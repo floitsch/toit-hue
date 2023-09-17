@@ -3,7 +3,11 @@ import monitor
 
 import .xml-parser
 
-class TagOpen:
+interface ParseValue:
+  opens tag-name/string --klass/string?=null -> bool
+  closes tag-name/string -> bool
+
+class TagOpen implements ParseValue:
   name/string
   attributes/Map
   self-closing/bool
@@ -13,25 +17,59 @@ class TagOpen:
   stringify -> string:
     return "<$name $attributes $(self-closing ? '/' : "")>"
 
-class TagClose:
+  klass -> string?:
+    return attributes.get "class"
+
+  opens tag-name/string --klass/string?=null -> bool:
+    if tag-name != name: return false
+    return matches-class klass
+
+  closes tag-name/string -> bool:
+    return false
+
+  matches-class klass/string? -> bool:
+    if not klass: return true
+    this-class := attributes.get "class"
+    if not this-class: return false
+    haystack-classes := this-class.split " "
+    needle-classes := klass.split " "
+    needle-classes.do:
+      if not haystack-classes.contains it: return false
+    return true
+
+class TagClose implements ParseValue:
   name/string
 
   constructor .name:
 
+  opens tag-name/string --klass/string?=null -> bool:
+    return false
+
+  closes tag-name/string -> bool:
+    return tag-name == name
+
   stringify -> string:
     return "</$name>"
 
-class Text:
+class Text implements ParseValue:
   text/string
 
   constructor .text:
 
+  opens tag-name/string --klass/string?=null -> bool:
+    return false
+
+  closes tag-name/string -> bool:
+    return false
+
   stringify -> string:
     return text
+
 
 class HueParser implements Consumer:
   channel_/monitor.Channel := monitor.Channel 1
   tag-stack_/List := []
+  nested-stack/List := []
   done/bool := false
   has-peeked_/bool := false
   peeked_/any := null
@@ -56,29 +94,38 @@ class HueParser implements Consumer:
         "img", "input", "keygen", "link", "meta", "param", "source", "track", "wbr"]
     return SINGLETON-TAGS.contains tag-name
 
-  peek_ -> any:
+  is-nested_ o/any -> bool:
+    if nested-stack.is-empty: return true
+    if tag-stack_.size > nested-stack.last: return true
+    return o is not TagClose or (o as TagClose).name != tag-stack_.last.name
+
+  peek_ --allow-non-nested/bool=false -> ParseValue?:
     if done: return null
     if not has-peeked_:
       peeked_ = channel_.receive
       has-peeked_ = true
       if not peeked_:
         done = true
-    return peeked_
+    if allow-non-nested: return peeked_
+    return (is-nested_ peeked_) ? peeked_ : null
 
-  next_ -> any:
-    o := peek_
-    has-peeked_ = false
+  next_ --allow-non-nested/bool=false -> ParseValue?:
+    o := peek_ --allow-non-nested=allow-non-nested
+    if o != null:
+      has-peeked_ = false
     if o is TagOpen:
-      if not o.self-closing and not is-singleton-tag o.name: tag-stack_.add o
-      return o
-    if o is TagClose:
-      if tag-stack_.is-empty or tag-stack_.last.name != o.name:
+      tag-open := o as TagOpen
+      if not tag-open.self-closing and not is-singleton-tag tag-open.name:
+        tag-stack_.add o
+    else if o is TagClose:
+      tag-close := o as TagClose
+      if tag-stack_.is-empty or tag-stack_.last.name != tag-close.name:
         // TODO: This is a hack to get around the fact that the Hue docs are
         // broken.
-        // print "Unexpected closing tag: $o"
+        if tag-close.name != "p":
+          print "Unexpected closing tag: $o $tag-stack_.last"
       else:
         tag-stack_.remove-last
-      return o
     return o
 
   skip-to-closing_ tag/string?=null:
@@ -93,27 +140,21 @@ class HueParser implements Consumer:
         throw "Could not find tag $tag"
     else:
       to-height = tag-stack_.size
-    while tag-stack_.size >= to-height: next_
+    while tag-stack_.size >= to-height: next_ --allow-non-nested
 
-  skip-to tag-name/string --min-height/int=0 -> any:
+  skip-to tag-name/string --klass/string?=null -> any:
     looking-for-closing := false
     if tag-name[0] == '/':
+      if klass: throw "Cannot specify class-name when looking for closing tag"
       looking-for-closing = true
       tag-name = tag-name[1..]
-    while tag-stack_.size >= min-height:
-      o := next_
-      if not o: return null
-      if not looking-for-closing and o is TagOpen and o.name == tag-name: return o
-      if looking-for-closing and o is TagClose and o.name == tag-name: return o
-    return null
 
-  skip-to-class class-name/string --tag/string="div" --min-height/int=0 -> any:
     while true:
-      o := skip-to tag --min-height=min-height
+      o/ParseValue? := next_
       if not o: return null
-      if o is TagOpen:
-        classes := o.attributes.get "class" --if-absent=:""
-        if (classes.split " ").contains class-name: return o
+      if not looking-for-closing and o.opens tag-name --klass=klass: return o
+      if looking-for-closing and o.closes tag-name: return o
+    return null
 
   get-text --skip-other-tags/bool=false -> string:
     while true:
@@ -123,147 +164,296 @@ class HueParser implements Consumer:
         return (o as Text).text
       continue
 
-  parse-object object-height/int indent/string="":
-    skip-to "ul" --min-height=object-height
-    list-height := tag-stack_.size
+  in tag/string --klass/string?=null [block] -> bool:
+    o := skip-to tag --klass=klass
+    if not o: return false
+    nested-stack.add tag-stack_.size
+    block.call
+    // Close.
+    while next_: null
+    next_ --allow-non-nested
+    nested-stack.remove-last
+    return true
+
+  for-each tag/string --klass/string?=null [block]:
     while true:
-      li := skip-to "li" --min-height=list-height
-      if not li: break
-      entry-height := tag-stack_.size
-      skip-to "strong"
-      property-name := get-text
-      skip-to-closing_ "strong"
-      text := get-text
-      if text == ": ":
-        // Skip the separator.
-      else:
-        throw "Expected ': ', got '$text' for property $property-name"
-      em := next_
-      if em is not TagOpen or (em as TagOpen).name != "em":
-        throw "Expected <em> for property $property-name"
-      required-or-type := get-text --skip-other-tags
-      is-required := false
-      type-string := ?
-      if required-or-type == "required":
-        is-required = true
-        type-string = get-text --skip-other-tags
-      else:
-        type-string = required-or-type
-      skip-to-closing_ "em"
-      type := type-string[1..type-string.size - 1]
-      is-array-type := type.starts-with "array of"
-      description := ""
-      new-line := peek_
-      if new-line is Text:
-        next_ // Consume the new-line.
-        description-p-tag := peek_
-        if description-p-tag is TagOpen and (description-p-tag as TagOpen).name == "p":
-          next_ // Consume '<p>'.
-          description-text := peek_
-          if description-text is not Text:
-            if description-text is not TagOpen or (description-text as TagOpen).name != "strong":
-              throw "Expected strong for 'Items'"
-            // Not a description
-          else:
-            description = get-text
-      // skip-to "p" --min-height=list-height
-      // property-description := get-text --skip-other-tags
-      if is-array-type:
-        strong := skip-to "strong" --min-height=entry-height
-        if strong:
-          if get-text != "Items": throw "Expected 'Items'"
-          nested-name := get-text --skip-other-tags
-          parse-object entry-height "$indent  "
-      else:
-      print "$indent    $property-name: $type (required: $is-required): $description"
-      if type == "object":
-        parse-object list-height "$indent  "
-      skip-to-closing_ "li"
+      found := in tag --klass=klass block
+      if not found: break
 
-  parse-body entry-height/int:
-    skip-to "p" --min-height=entry-height // Media type
-    media-type-label := get-text --skip-other-tags
-    if media-type-label != "Media type": throw "Expected Media type"
-    media-type := get-text --skip-other-tags
-    print "    Media type: $media-type"
-    skip-to "p" --min-height=entry-height // Type
-    type-label := get-text --skip-other-tags
-    if type-label != "Type": throw "Expected Type"
-    type := get-text --skip-other-tags
-    print "    Type: $type"
+  // parse-object object-height/int indent/string="":
+  //   skip-to "ul" --min-height=object-height
+  //   list-height := tag-stack_.size
+  //   while true:
+  //     li := skip-to "li" --min-height=list-height
+  //     if not li: break
+  //     entry-height := tag-stack_.size
+  //     skip-to "strong"
+  //     property-name := get-text
+  //     skip-to-closing_ "strong"
+  //     text := get-text
+  //     if text == ": ":
+  //       // Skip the separator.
+  //     else:
+  //       throw "Expected ': ', got '$text' for property $property-name"
+  //     em := next_
+  //     if em is not TagOpen or (em as TagOpen).name != "em":
+  //       throw "Expected <em> for property $property-name"
+  //     required-or-type := get-text --skip-other-tags
+  //     is-required := false
+  //     type-string := ?
+  //     if required-or-type == "required":
+  //       is-required = true
+  //       type-string = get-text --skip-other-tags
+  //     else:
+  //       type-string = required-or-type
+  //     skip-to-closing_ "em"
+  //     type := type-string[1..type-string.size - 1]
+  //     is-array-type := type.starts-with "array of"
+  //     description := ""
+  //     new-line := peek_
+  //     if new-line is Text:
+  //       next_ // Consume the new-line.
+  //       description-p-tag := peek_
+  //       if description-p-tag is TagOpen and (description-p-tag as TagOpen).name == "p":
+  //         next_ // Consume '<p>'.
+  //         description-text := peek_
+  //         if description-text is not Text:
+  //           if description-text is not TagOpen or (description-text as TagOpen).name != "strong":
+  //             throw "Expected strong for 'Items'"
+  //           // Not a description
+  //         else:
+  //           description = get-text
+  //     // skip-to "p" --min-height=list-height
+  //     // property-description := get-text --skip-other-tags
+  //     if is-array-type:
+  //       strong := skip-to "strong" --min-height=entry-height
+  //       if strong:
+  //         if get-text != "Items": throw "Expected 'Items'"
+  //         nested-name := get-text --skip-other-tags
+  //         parse-object entry-height "$indent  "
+  //     else:
+  //     print "$indent    $property-name: $type (required: $is-required): $description"
+  //     if type == "object":
+  //       parse-object list-height "$indent  "
+  //     skip-to-closing_ "li"
 
-    skip-to "p" --min-height=entry-height // Properties
-    properties-label := get-text --skip-other-tags
-    if properties-label != "Properties": throw "Expected Properties"
-    parse-object entry-height
+  // parse-body entry-height/int:
+
 
   parse xml/string:
     parser := Parser xml --consumer=this
-    task:: parser.parse
+    parse-task := task:: parser.parse
 
-    // Skip the header:
-    skip-to "body"
+    in "body":
+      for-each "div" --klass="panel panel-default":
+        parse-resource-panel
 
-    while true:
-      panel-group := skip-to-class "panel"
-      height := tag-stack_.size
-      if not panel-group: break
-      section-header := skip-to-class "panel-title" --tag="h3"
-      section-path := get-text
-      skip-to-class "top-resource-description"
+    parse-task.cancel
+
+  parse-resource-panel:
+    section-header := skip-to "h3" --klass="panel-title"
+    section-path := get-text
+    in "div" --klass="panel-body":
+      skip-to "div" --klass="top-resource-description"
       section-description-p := skip-to "p"
       section-description := get-text
 
       print "$section-path: $section-description"
 
-      while true:
-        method-header := skip-to-class "modal-title" --tag="h4" --min-height=height
-        if not method-header: break
-        span := next_
-        method-name := get-text --skip-other-tags
-        skip-to-class "parent" --tag="span"
-        signature := ""
-        tag := next_
-        if tag is Text:
-          signature = (tag as Text).text
-        signature-rest := get-text --skip-other-tags
-        signature = "$signature$signature-rest"
-        print "  $method-name - $signature"
-        body := skip-to-class "modal-body"
-        body-height := tag-stack_.size
-        nav-tabs := skip-to-class "nav-tabs" --tag="ul"
-        nav-height := tag-stack_.size
-        tab-entries := []
-        while true:
-          tab-entry := skip-to "li" --min-height=nav-height
-          if not tab-entry: break
+      for-each "div" --klass="modal-content":
+        parse-modal
+
+  parse-modal:
+    in "div" --klass="modal-header":
+      skip-to "h4" --klass="modal-title"
+      skip-to "span" --klass="badge"
+      method-name := get-text
+
+      skip-to "span" --klass="parent"
+      signature := ""
+      tag := next_
+      if tag is Text:
+        signature = (tag as Text).text
+      signature-rest := get-text --skip-other-tags
+      signature = "$signature$signature-rest"
+      print "  $method-name - $signature"
+
+    in "div" --klass="modal-body":
+      tab-entries := []
+      in "ul" --klass="nav nav-tabs":
+        for-each "li":
           tab-entries.add (get-text --skip-other-tags)
-        tab-entries.do: | tab-entry/string |
-          pane := skip-to-class "tab-pane" --min-height=body-height
-          if not pane: throw "Expected pane"
-          pane-height := tag-stack_.size
-          if tab-entry == "Request":
-            while true:
-              header := skip-to "h3" --min-height=pane-height
-              if not header: break
-              entry-height := tag-stack_.size - 1
-              text := get-text
-              if text == "URI Parameters":
-                skip-to "ul" --min-height=entry-height
-                uri-param-height := tag-stack_.size
-                while true:
-                  li := skip-to "li" --min-height=uri-param-height
-                  if not li: break
-                  param-name := get-text --skip-other-tags
-                  skip-to-closing_ "li"
-                  // No need to check for anything. At the moment the URI parameter is
-                  // always "id" and required.
-                  print "    $param-name"
-              else if text == "Body":
-                parse-body entry-height
-              else:
-                throw "Unexpected text: $text"
-//              throw "Expected URI Parameters or Body, got $text"
+
+      tab-entries.do: | tab-name/string |
+        in "div" --klass="tab-pane":
+          if tab-name == "Request":
+            parse-request-tab
+          else if tab-name == "Response":
+            parse-response-tab
+          else:
+            throw "Unexpected tab name: $tab-name"
+
+  parse-request-tab:
+    while true:
+      header-tag := skip-to "h3"
+      if not header-tag: break
+      text := get-text
+      if text == "URI Parameters":
+        parse-uri-parameters
+      else if text == "Body":
+        parse-body
+      else:
+        throw "Unexpected text: $text"
+
+  parse-uri-parameters:
+    in "ul":
+      for-each "li":
+        // Currently it's always "id", a required string.
+        param-name := get-text --skip-other-tags
+        print "    $param-name"
+
+  parse-body:
+    while true:
+      need-to-parse-properties := false
+      got-p := in "p":
+        if not peek_.opens "strong": throw "Expected <strong>"
+        section-name := get-text --skip-other-tags
+        if section-name == "Properties":
+          need-to-parse-properties = true
+        else:
+          skip-to-closing_ "strong"
+          value := get-text --skip-other-tags
+          if not value.starts_with ": ": throw "Expected ': '"
+          value = value[2..]
+          print "    $section-name: $value"
+      if not got-p: break  // Most likely a new response code.
+      if need-to-parse-properties:
+        parse-object
+        need-to-parse-properties = false
+
+  parse-object --indentation/string="":
+    in "ul":
+      for-each "li":
+        property-name/string? := null
+        in "strong": property-name = get-text --skip-other-tags
+        separator := get-text
+        if separator != ": ": throw "Expected ': '"
+        em := peek_
+        if not em.opens "em": throw "Expected <em> for property $property-name"
+        is-required := false
+        type/string? := null
+        in "em":
+          type-string/string := ?
+          required-or-type := get-text --skip-other-tags
+          if required-or-type == "required":
+            is-required = true
+            type-string = get-text --skip-other-tags
+          else:
+            type-string = required-or-type
+          type = type-string[1..type-string.size - 1]
+        is-array-type := type.starts-with "array of"
+        description := ""
+        new-line := peek_
+        if new-line is Text:
+          next_ // Consume the new-line.
+          description-p-tag := peek_
+          if description-p-tag.opens "p":
+            next_ // Consume '<p>'.
+            description-text := peek_
+            if description-text is Text:
+              description = get-text
+            else if description-text.opens "strong":
+              // Doesn't have a description.
+            else:
+              throw "Expected strong for 'Items'"
+
+        print "$indentation    $property-name: $type (required: $is-required): $description"
+
+        if type == "object":
+          parse-object --indentation="$indentation  "
+
+  //     em := next_
+  //     if em is not TagOpen or (em as TagOpen).name != "em":
+  //       throw "Expected <em> for property $property-name"
+  //     required-or-type := get-text --skip-other-tags
+  //     is-required := false
+  //     type-string := ?
+  //     if required-or-type == "required":
+  //       is-required = true
+  //       type-string = get-text --skip-other-tags
+  //     else:
+  //       type-string = required-or-type
+  //     skip-to-closing_ "em"
+  //     type := type-string[1..type-string.size - 1]
+  //     is-array-type := type.starts-with "array of"
+  //     description := ""
+  //     new-line := peek_
+  //     if new-line is Text:
+  //       next_ // Consume the new-line.
+  //       description-p-tag := peek_
+  //       if description-p-tag is TagOpen and (description-p-tag as TagOpen).name == "p":
+  //         next_ // Consume '<p>'.
+  //         description-text := peek_
+  //         if description-text is not Text:
+  //           if description-text is not TagOpen or (description-text as TagOpen).name != "strong":
+  //             throw "Expected strong for 'Items'"
+  //           // Not a description
+  //         else:
+  //           description = get-text
+  //     // skip-to "p" --min-height=list-height
+  //     // property-description := get-text --skip-other-tags
+  //     if is-array-type:
+  //       strong := skip-to "strong" --min-height=entry-height
+  //       if strong:
+  //         if get-text != "Items": throw "Expected 'Items'"
+  //         nested-name := get-text --skip-other-tags
+  //         parse-object entry-height "$indent  "
+  //     else:
+  //     print "$indent    $property-name: $type (required: $is-required): $description"
+  //     if type == "object":
+  //       parse-object list-height "$indent  "
+  //     skip-to-closing_ "li"
+
+
+          //   skip-to "p" --min-height=entry-height // Media type
+  //   media-type-label := get-text --skip-other-tags
+  //   if media-type-label != "Media type": throw "Expected Media type"
+  //   media-type := get-text --skip-other-tags
+  //   print "    Media type: $media-type"
+  //   skip-to "p" --min-height=entry-height // Type
+  //   type-label := get-text --skip-other-tags
+  //   if type-label != "Type": throw "Expected Type"
+  //   type := get-text --skip-other-tags
+  //   print "    Type: $type"
+
+  //   skip-to "p" --min-height=entry-height // Properties
+  //   properties-label := get-text --skip-other-tags
+  //   if properties-label != "Properties": throw "Expected Properties"
+  //   parse-object entry-height
+
+
+
+  parse-response-tab:
+//             header := skip-to "h3" --min-height=pane-height
+//             if not header: break
+//             entry-height := tag-stack_.size - 1
+//             text := get-text
+//             if text == "URI Parameters":
+//               skip-to "ul" --min-height=entry-height
+//               uri-param-height := tag-stack_.size
+//               while true:
+//                 li := skip-to "li" --min-height=uri-param-height
+//                 if not li: break
+//                 param-name := get-text --skip-other-tags
+//                 skip-to-closing_ "li"
+//                 // No need to check for anything. At the moment the URI parameter is
+//                 // always "id" and required.
+//                 print "    $param-name"
+//             else if text == "Body":
+//               parse-body entry-height
+//             else:
+//               throw "Unexpected text: $text"
+// //              throw "Expected URI Parameters or Body, got $text"
 
 
 
