@@ -83,8 +83,28 @@ class HueParser implements Consumer:
   on-comment text/string --from/int --to/int:
     // Ignore.
 
+  decode-xml text/string:
+    text = text.replace "&lt;" "<"
+    text = text.replace "&gt;" ">"
+    text = text.replace "&amp;" "&"
+    text = text.replace "&quot;" "\""
+    text = text.replace "&apos;" "'"
+    // Replace all '&#[0-9]+;' with the corresponding character.
+    last-pos := 0
+    while true:
+      amp-pos := text.index-of "&#" last-pos
+      if amp-pos == -1: break
+      last-pos = amp-pos
+      semi-pos := text.index-of ";" amp-pos
+      if semi-pos == -1: break
+      number := int.parse text[amp-pos + 2..semi-pos]
+      text = text[..amp-pos] + (string.from-rune number) + text[semi-pos + 1..]
+
+    return text
+
   on-text text/string --from/int --to/int:
-    channel_.send (Text text)
+    decoded := decode-xml text
+    channel_.send (Text decoded)
 
   on-eof:
     channel_.send null
@@ -155,6 +175,13 @@ class HueParser implements Consumer:
       if not looking-for-closing and o.opens tag-name --klass=klass: return o
       if looking-for-closing and o.closes tag-name: return o
     return null
+
+  skip-whitespace:
+    while true:
+      o := peek_
+      if not o or o is not Text: break
+      if (o as Text).text.trim != "": break
+      next_
 
   get-text --skip-other-tags/bool=false -> string:
     while true:
@@ -314,9 +341,14 @@ class HueParser implements Consumer:
 
   parse-body:
     while true:
+      skip-whitespace
       need-to-parse-properties := false
-      got-p := in "p":
-        if not peek_.opens "strong": throw "Expected <strong>"
+      got-p := peek_ and peek_.opens "p"
+      if not got-p:
+        // Most likely a new response code or status code.
+        break
+      in "p":
+        if not peek_.opens "strong": throw "Expected <strong> got $peek_"
         section-name := get-text --skip-other-tags
         if section-name == "Properties":
           need-to-parse-properties = true
@@ -326,7 +358,6 @@ class HueParser implements Consumer:
           if not value.starts_with ": ": throw "Expected ': '"
           value = value[2..]
           print "    $section-name: $value"
-      if not got-p: break  // Most likely a new response code.
       if need-to-parse-properties:
         parse-object
         need-to-parse-properties = false
@@ -371,92 +402,33 @@ class HueParser implements Consumer:
 
         if type == "object":
           parse-object --indentation="$indentation  "
-
-  //     em := next_
-  //     if em is not TagOpen or (em as TagOpen).name != "em":
-  //       throw "Expected <em> for property $property-name"
-  //     required-or-type := get-text --skip-other-tags
-  //     is-required := false
-  //     type-string := ?
-  //     if required-or-type == "required":
-  //       is-required = true
-  //       type-string = get-text --skip-other-tags
-  //     else:
-  //       type-string = required-or-type
-  //     skip-to-closing_ "em"
-  //     type := type-string[1..type-string.size - 1]
-  //     is-array-type := type.starts-with "array of"
-  //     description := ""
-  //     new-line := peek_
-  //     if new-line is Text:
-  //       next_ // Consume the new-line.
-  //       description-p-tag := peek_
-  //       if description-p-tag is TagOpen and (description-p-tag as TagOpen).name == "p":
-  //         next_ // Consume '<p>'.
-  //         description-text := peek_
-  //         if description-text is not Text:
-  //           if description-text is not TagOpen or (description-text as TagOpen).name != "strong":
-  //             throw "Expected strong for 'Items'"
-  //           // Not a description
-  //         else:
-  //           description = get-text
-  //     // skip-to "p" --min-height=list-height
-  //     // property-description := get-text --skip-other-tags
-  //     if is-array-type:
-  //       strong := skip-to "strong" --min-height=entry-height
-  //       if strong:
-  //         if get-text != "Items": throw "Expected 'Items'"
-  //         nested-name := get-text --skip-other-tags
-  //         parse-object entry-height "$indent  "
-  //     else:
-  //     print "$indent    $property-name: $type (required: $is-required): $description"
-  //     if type == "object":
-  //       parse-object list-height "$indent  "
-  //     skip-to-closing_ "li"
-
-
-          //   skip-to "p" --min-height=entry-height // Media type
-  //   media-type-label := get-text --skip-other-tags
-  //   if media-type-label != "Media type": throw "Expected Media type"
-  //   media-type := get-text --skip-other-tags
-  //   print "    Media type: $media-type"
-  //   skip-to "p" --min-height=entry-height // Type
-  //   type-label := get-text --skip-other-tags
-  //   if type-label != "Type": throw "Expected Type"
-  //   type := get-text --skip-other-tags
-  //   print "    Type: $type"
-
-  //   skip-to "p" --min-height=entry-height // Properties
-  //   properties-label := get-text --skip-other-tags
-  //   if properties-label != "Properties": throw "Expected Properties"
-  //   parse-object entry-height
-
-
+        if is-array-type:
+          strong := skip-to "strong"
+          if strong:
+            if get-text != "Items": throw "Expected 'Items'"
+            nested-name := get-text --skip-other-tags
+            nested-name = nested-name.trim --left ": "
+            print "$indentation     Items: $nested-name"
+            parse-object --indentation="$indentation  "
 
   parse-response-tab:
-//             header := skip-to "h3" --min-height=pane-height
-//             if not header: break
-//             entry-height := tag-stack_.size - 1
-//             text := get-text
-//             if text == "URI Parameters":
-//               skip-to "ul" --min-height=entry-height
-//               uri-param-height := tag-stack_.size
-//               while true:
-//                 li := skip-to "li" --min-height=uri-param-height
-//                 if not li: break
-//                 param-name := get-text --skip-other-tags
-//                 skip-to-closing_ "li"
-//                 // No need to check for anything. At the moment the URI parameter is
-//                 // always "id" and required.
-//                 print "    $param-name"
-//             else if text == "Body":
-//               parse-body entry-height
-//             else:
-//               throw "Unexpected text: $text"
-// //              throw "Expected URI Parameters or Body, got $text"
-
-
-
+    while true:
+      header-tag := skip-to "h2"
+      if not header-tag: break
+      text := get-text
+      if text != "HTTP status code ":
+        throw "Unexpected text: $text"
+      a-tag := peek_
+      if not a-tag or not a-tag.opens "a": throw "Expected <a>"
+      status-code := get-text --skip-other-tags
+      print "   Response with status code $status-code"
+      skip-to "/h2"
+      body-header := skip-to "h3"
+      if not body-header: throw "Expected <h3>"
+      body-text := get-text --skip-other-tags
+      if body-text != "Body": throw "Expected 'Body'"
+      skip-to "/h3"
+      parse-body
 
 main args:
   (HueParser).parse (file.read-content args[0]).to-string
