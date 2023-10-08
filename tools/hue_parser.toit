@@ -1,5 +1,6 @@
 import host.file
 import monitor
+import encoding.json
 
 import .xml-parser
 
@@ -65,6 +66,109 @@ class Text implements ParseValue:
   stringify -> string:
     return text
 
+
+class HueApi:
+  endpoints/List // of HueEndpoint.
+
+  constructor .endpoints:
+
+  to-json -> Map:
+    return {
+      "endpoints": endpoints.map: it.to-json
+    }
+
+class HueEndpoint:
+  path/string
+  description/string
+
+  methods/List // of HueMethod.
+
+  constructor --.path --.description --.methods:
+
+  to-json -> Map:
+    return {
+      "path": path,
+      "description": description,
+      "methods": methods.map: it.to-json
+    }
+
+class HueMethod:
+  method/string
+  signature/string
+
+  request/HueRequest?
+  responses/List // of HueResponse.
+
+  constructor --.method --.signature --.request --.responses:
+
+  to-json -> Map:
+    result := {
+      "method": method,
+      "signature": signature,
+      "responses": responses.map: it.to-json
+    }
+    if request:
+      result["request"] = request.to-json
+    return result
+
+class HueRequest:
+  parameters/List
+  body/HueBody?
+
+  constructor --.parameters --.body:
+
+  to-json -> Map:
+    result := {
+      "parameters": parameters
+    }
+    if body:
+      result["body"] = body.to-json
+    return result
+
+class HueResponse:
+  status-code/string
+  body/HueBody
+
+  constructor --.status-code --.body:
+
+  to-json -> Map:
+    return {
+      "status-code": status-code,
+      "body": body.to-json
+    }
+
+class HueBody:
+  media-type/string  // Always "application/json".
+  type/string
+  properties/Map  // from string to HueProperty.
+
+  constructor --.media-type --.type --.properties:
+
+  to-json -> Map:
+    return {
+      "media-type": media-type,
+      "type": type,
+      "properties": properties.map: | _ value | value.to-json,
+    }
+
+class HueProperty:
+  type/string
+  description/string
+  required/bool
+  is-array-type/bool
+  properties/Map?  // from string to HueProperty.
+
+  constructor --.type --.description --.required --.is-array-type --.properties:
+
+  to-json -> Map:
+    result := {
+      "type": type,
+      "description": description,
+      "required": required
+    }
+    if properties:
+      result["properties"] = properties.map: | _ value | value.to-json
+    return result
 
 class HueParser implements Consumer:
   channel_/monitor.Channel := monitor.Channel 1
@@ -207,103 +311,53 @@ class HueParser implements Consumer:
       found := in tag --klass=klass block
       if not found: break
 
-  // parse-object object-height/int indent/string="":
-  //   skip-to "ul" --min-height=object-height
-  //   list-height := tag-stack_.size
-  //   while true:
-  //     li := skip-to "li" --min-height=list-height
-  //     if not li: break
-  //     entry-height := tag-stack_.size
-  //     skip-to "strong"
-  //     property-name := get-text
-  //     skip-to-closing_ "strong"
-  //     text := get-text
-  //     if text == ": ":
-  //       // Skip the separator.
-  //     else:
-  //       throw "Expected ': ', got '$text' for property $property-name"
-  //     em := next_
-  //     if em is not TagOpen or (em as TagOpen).name != "em":
-  //       throw "Expected <em> for property $property-name"
-  //     required-or-type := get-text --skip-other-tags
-  //     is-required := false
-  //     type-string := ?
-  //     if required-or-type == "required":
-  //       is-required = true
-  //       type-string = get-text --skip-other-tags
-  //     else:
-  //       type-string = required-or-type
-  //     skip-to-closing_ "em"
-  //     type := type-string[1..type-string.size - 1]
-  //     is-array-type := type.starts-with "array of"
-  //     description := ""
-  //     new-line := peek_
-  //     if new-line is Text:
-  //       next_ // Consume the new-line.
-  //       description-p-tag := peek_
-  //       if description-p-tag is TagOpen and (description-p-tag as TagOpen).name == "p":
-  //         next_ // Consume '<p>'.
-  //         description-text := peek_
-  //         if description-text is not Text:
-  //           if description-text is not TagOpen or (description-text as TagOpen).name != "strong":
-  //             throw "Expected strong for 'Items'"
-  //           // Not a description
-  //         else:
-  //           description = get-text
-  //     // skip-to "p" --min-height=list-height
-  //     // property-description := get-text --skip-other-tags
-  //     if is-array-type:
-  //       strong := skip-to "strong" --min-height=entry-height
-  //       if strong:
-  //         if get-text != "Items": throw "Expected 'Items'"
-  //         nested-name := get-text --skip-other-tags
-  //         parse-object entry-height "$indent  "
-  //     else:
-  //     print "$indent    $property-name: $type (required: $is-required): $description"
-  //     if type == "object":
-  //       parse-object list-height "$indent  "
-  //     skip-to-closing_ "li"
-
-  // parse-body entry-height/int:
-
-
-  parse xml/string:
+  parse xml/string -> HueApi:
     parser := Parser xml --consumer=this
     parse-task := task:: parser.parse
 
+    endpoints := []
     in "body":
       for-each "div" --klass="panel panel-default":
-        parse-resource-panel
+        endpoints.add parse-resource-panel
 
     parse-task.cancel
 
-  parse-resource-panel:
+    return HueApi endpoints
+
+  parse-resource-panel -> HueEndpoint:
     section-header := skip-to "h3" --klass="panel-title"
     section-path := get-text
+    section-description/string? := null
+    methods := []
     in "div" --klass="panel-body":
       skip-to "div" --klass="top-resource-description"
       section-description-p := skip-to "p"
-      section-description := get-text
-
-      print "$section-path: $section-description"
+      section-description = get-text
 
       for-each "div" --klass="modal-content":
-        parse-modal
+        methods.add parse-modal
 
-  parse-modal:
+    return HueEndpoint
+        --path=section-path
+        --description=section-description
+        --methods=methods
+
+  parse-modal -> HueMethod:
+    method-name/string? := null
+    signature/string := ""
+    request/HueRequest? := null
+    responses/List? := null
     in "div" --klass="modal-header":
       skip-to "h4" --klass="modal-title"
       skip-to "span" --klass="badge"
-      method-name := get-text
+      method-name = get-text
 
       skip-to "span" --klass="parent"
-      signature := ""
       tag := next_
       if tag is Text:
         signature = (tag as Text).text
       signature-rest := get-text --skip-other-tags
       signature = "$signature$signature-rest"
-      print "  $method-name - $signature"
 
     in "div" --klass="modal-body":
       tab-entries := []
@@ -314,32 +368,50 @@ class HueParser implements Consumer:
       tab-entries.do: | tab-name/string |
         in "div" --klass="tab-pane":
           if tab-name == "Request":
-            parse-request-tab
+            if request: throw "Duplicate request tab"
+            request = parse-request-tab
           else if tab-name == "Response":
-            parse-response-tab
+            if responses: throw "Duplicate response tab"
+            responses = parse-response-tab
           else:
             throw "Unexpected tab name: $tab-name"
+    return HueMethod
+              --method=method-name
+              --signature=signature
+              --request=request
+              --responses=responses
 
-  parse-request-tab:
+  parse-request-tab -> HueRequest:
+    uri-parameters := []
+    body/HueBody? := null
     while true:
       header-tag := skip-to "h3"
       if not header-tag: break
       text := get-text
+      skip-to "/h3"
       if text == "URI Parameters":
-        parse-uri-parameters
+        uri-parameters = parse-uri-parameters
       else if text == "Body":
-        parse-body
+        body = parse-body
       else:
         throw "Unexpected text: $text"
+    return HueRequest
+        --parameters=uri-parameters
+        --body=body
 
-  parse-uri-parameters:
+  parse-uri-parameters -> List:
+    result := []
     in "ul":
       for-each "li":
         // Currently it's always "id", a required string.
         param-name := get-text --skip-other-tags
-        print "    $param-name"
+        result.add param-name
+    return result
 
-  parse-body:
+  parse-body -> HueBody:
+    media-type/string? := null
+    type/string? := null
+    properties := {:}
     while true:
       skip-whitespace
       need-to-parse-properties := false
@@ -357,12 +429,22 @@ class HueParser implements Consumer:
           value := get-text --skip-other-tags
           if not value.starts_with ": ": throw "Expected ': '"
           value = value[2..]
-          print "    $section-name: $value"
+          if section-name == "Media type":
+            media-type = value
+          else if section-name == "Type":
+            type = value
+          else:
+            throw "Unexpected section name: $section-name"
       if need-to-parse-properties:
-        parse-object
+        properties = parse-object
         need-to-parse-properties = false
+    return HueBody
+              --media-type=media-type
+              --type=type
+              --properties=properties
 
-  parse-object --indentation/string="":
+  parse-object -> Map:
+    result := {:}
     in "ul":
       for-each "li":
         property-name/string? := null
@@ -398,20 +480,27 @@ class HueParser implements Consumer:
             else:
               throw "Expected strong for 'Items'"
 
-        print "$indentation    $property-name: $type (required: $is-required): $description"
-
+        properties/Map? := null
         if type == "object":
-          parse-object --indentation="$indentation  "
+          properties = parse-object
         if is-array-type:
           strong := skip-to "strong"
           if strong:
             if get-text != "Items": throw "Expected 'Items'"
             nested-name := get-text --skip-other-tags
             nested-name = nested-name.trim --left ": "
-            print "$indentation     Items: $nested-name"
-            parse-object --indentation="$indentation  "
+            properties = parse-object
 
-  parse-response-tab:
+        result[property-name] = HueProperty
+                                  --type=type
+                                  --description=description
+                                  --required=is-required
+                                  --is-array-type=is-array-type
+                                  --properties=properties
+    return result
+
+  parse-response-tab -> List:
+    result := []
     while true:
       header-tag := skip-to "h2"
       if not header-tag: break
@@ -421,15 +510,20 @@ class HueParser implements Consumer:
       a-tag := peek_
       if not a-tag or not a-tag.opens "a": throw "Expected <a>"
       status-code := get-text --skip-other-tags
-      print "   Response with status code $status-code"
       skip-to "/h2"
       body-header := skip-to "h3"
       if not body-header: throw "Expected <h3>"
       body-text := get-text --skip-other-tags
       if body-text != "Body": throw "Expected 'Body'"
       skip-to "/h3"
-      parse-body
+      body := parse-body
+      response := HueResponse
+                    --status-code=status-code
+                    --body=body
+      result.add response
+    return result
 
 main args:
-  (HueParser).parse (file.read-content args[0]).to-string
+  api := (HueParser).parse (file.read-content args[0]).to-string
+  print (json.stringify api.to-json)
 
