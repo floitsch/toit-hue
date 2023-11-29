@@ -1,0 +1,39 @@
+Good way to get started:
+- get the IP of your bridge. You can just visit https://discovery.meethue.com/
+  It will list the known IPs for this public IP.
+
+---------- OLD V1 --------------
+- visit <ip>/debug/clip.html, which allows to send API requests through the
+  browser.
+- Start by getting a username:
+  ```
+  /api
+  { "devicetype": "some-name" }
+  POST
+  ```
+  This should fail initially, because you need to press the button on the
+    bridge. Once you do that, you can try again and it should work.
+
+- Now you can try to get the list of lights:
+    ```
+    /api/<username>/lights
+    GET
+    ```
+    This should return a list of lights, with their names and IDs.
+
+---------- NEW V2 --------------
+As for v1 get a new user name.
+This will eventually be replaced with an actual application key (I think).
+
+v2 is https only.
+v2 sends the key as header: hue-application-key
+
+Example:
+- URL: /clip/v2/resource/light
+- Headers:
+  - hue-application-key: <username>
+
+-> GET.
+
+My username:
+"3d2R8G-g98ruAjoHyd6XUEZ9ccr95Wjx926n70cU"
