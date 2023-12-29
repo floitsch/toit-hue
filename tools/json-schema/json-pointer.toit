@@ -1,0 +1,29 @@
+import encoding.url
+
+class JsonPointer:
+  segments/List
+
+  constructor:
+    segments = [""]
+
+  constructor.with-segments_ .segments:
+
+  operator + segment/string:
+    escaped := escape_ segment
+    new-segments := segments.copy
+    new-segments.add escaped
+    return JsonPointer.with-segments_ new-segments
+
+  static escape_ str/string -> string:
+    str = str.replace --all "~" "~0"
+    str = str.replace --all "/" "~1"
+    return str
+
+  to-string -> string:
+    return segments.join "/"
+
+  to-fragment-string -> string:
+    return (segments.map: url.encode it).join "/"
+
+  stringify -> string:
+    return to-string

@@ -1,9 +1,10 @@
 /**
-An implementation of the JSON Schema Specification Draft 2020-12.
-https://tools.ietf.org/html/draft-bhutton-json-schema-00
+An implementation of the JSON Schema Specification Draft 2022-12.
+https://json-schema.org/draft/2020-12/json-schema-core#name-the-vocabulary-keyword
 */
 
 class Vocabulary:
+
 
 class MetaCore:
   static KEYS ::= [
