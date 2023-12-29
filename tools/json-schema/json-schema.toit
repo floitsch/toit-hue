@@ -330,25 +330,22 @@ build o/any -> Schema:
 
 abstract class Schema:
   json-value/any
-  parent/SchemaObject_?
+  schema-resource/SchemaObject_? := ?
   // The URI of the schema resource containing this Schema.
   // A schema resource is the innermost Schema with an "$id" property.
-  schema-resource-uri/UriReference?
   dynamic-anchors/Set? := null
 
-  constructor.from-sub_ .json-value --.parent --.schema-resource-uri:
+  constructor.from-sub_ .json-value --.schema-resource:
 
   static build_ o/any --parent/SchemaObject_? --context/BuildContext --json-pointer/JsonPointer -> Schema:
     result/Schema := ?
-    if o == true:
-      result = SchemaTrue_ --parent=parent
-    else if o == false:
-      result = SchemaFalse_ --parent=parent
+    if o is bool:
+      result = SchemaBool_ o --schema-resource=parent.schema-resource
     else:
       schema-object/SchemaObject_ := ?
       new-id := o.get "\$id"
       if not new-id and parent:
-        schema-object = SchemaObject_ o --parent=parent --schema-resource-uri=parent.schema-resource-uri
+        schema-object = SchemaObject_ o --schema-resource=parent.schema-resource
       else:
         // This is a resource schema.
         // TODO(florian): get the "$schema".
@@ -362,7 +359,9 @@ abstract class Schema:
           new-uri = new-uri.resolve --base=context.schema-resource-uri
         new-uri = new-uri.normalize
         dynamic-anchors := {}
-        schema-object = SchemaObject_ o --parent=parent --schema-resource-uri=new-uri
+        // Instantiate the schema object with a resource set to null and then update it to itself.
+        schema-object = SchemaObject_ o --schema-resource=null
+        schema-object.schema-resource = schema-object
         schema-object.dynamic-anchors = dynamic-anchors
         context = context.with
             --schema-resource-uri=new-uri
@@ -390,8 +389,8 @@ abstract class Schema:
 class SchemaObject_ extends Schema:
   is-resolved/bool := false
 
-  constructor o/Map --parent/SchemaObject_? --schema-resource-uri/UriReference:
-    super.from-sub_ o --parent=parent --schema-resource-uri=schema-resource-uri
+  constructor o/Map --schema-resource/SchemaObject_?:
+    super.from-sub_ o --schema-resource=schema-resource
 
   actions/Map ::= {:}
 
@@ -410,26 +409,15 @@ class SchemaObject_ extends Schema:
       if not action.validate o: return false
     return true
 
-class SchemaTrue_ extends Schema:
-  constructor --parent/SchemaObject_?:
-    super.from-sub_ true --parent=parent --schema-resource-uri=parent.schema-resource-uri
+class SchemaBool_ extends Schema:
+  constructor value/bool --schema-resource/SchemaObject_:
+    super.from-sub_ value --schema-resource=schema-resource
 
   validate o/any -> bool:
-    return true
+    return json-value
 
   resolve_ --store/Store -> none:
     return
-
-class SchemaFalse_ extends Schema:
-  constructor --parent/SchemaObject_?:
-    super.from-sub_ false --parent=parent --schema-resource-uri=parent.schema-resource-uri
-
-  validate o/any -> bool:
-    return false
-
-  resolve_ --store/Store -> none:
-    return
-
 
 class BuildContext:
   vocabularies/Map
