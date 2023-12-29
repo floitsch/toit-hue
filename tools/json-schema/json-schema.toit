@@ -342,6 +342,8 @@ abstract class Schema:
       schema-object := SchemaObject_ o --parent=parent
       new-id := o.get "\$id"
       if new-id or parent == null:
+        // This is a resource schema.
+        // TODO(florian): get the "$schema".
         if not new-id:
           new-id = "urn:uuid:$(uuid.uuid5 "json-schema" "$Time.now.ns-since-epoch")"
         // Empty fragments are allowed (but not recommended).
