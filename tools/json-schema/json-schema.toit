@@ -330,7 +330,7 @@ build o/any -> Schema:
 
 abstract class Schema:
   json-value/any
-  schema-resource/SchemaObject_? := ?
+  schema-resource/SchemaResource_? := ?
 
   constructor.from-sub_ .json-value --.schema-resource:
 
@@ -344,28 +344,13 @@ abstract class Schema:
       if not new-id and parent:
         schema-object = SchemaObject_ o --schema-resource=parent.schema-resource
       else:
-        // This is a resource schema.
-        // TODO(florian): get the "$schema".
-        if not new-id:
-          new-id = "urn:uuid:$(uuid.uuid5 "json-schema" "$Time.now.ns-since-epoch")"
-        // Empty fragments are allowed (but not recommended).
-        // Trim them.
-        new-id = new-id.trim --right "#"
-        new-uri := UriReference.parse new-id
-        if not new-uri.is-absolute:
-          new-uri = new-uri.resolve --base=context.schema-resource-uri
-        new-uri = new-uri.normalize
-        dynamic-anchors := {}
-        // Instantiate the schema object with a resource set to null and then update it to itself.
-        schema-resource := SchemaResource_ o
-        schema-resource.schema-resource = schema-resource
-        schema-resource.dynamic-anchors = dynamic-anchors
+        schema-resource := SchemaResource_ o --parent=parent
         context = context.with
-            --schema-resource-uri=new-uri
-            --vocabularies=DEFAULT-VOCABULARIES
-            --dynamic-anchors=dynamic-anchors
+            --schema-resource-uri=schema-resource.uri
+            --vocabularies=schema-resource.vocabularies
+            --dynamic-anchors=schema-resource.dynamic-anchors
         // Also add the schema without the '#' fragment.
-        context.store.add new-uri.to-string schema-resource
+        context.store.add schema-resource.uri.to-string schema-resource
         // Reset the json-pointer.
         json-pointer = JsonPointer
         schema-object = schema-resource
@@ -387,7 +372,7 @@ abstract class Schema:
 class SchemaObject_ extends Schema:
   is-resolved/bool := false
 
-  constructor o/Map --schema-resource/SchemaObject_?:
+  constructor o/Map --schema-resource/SchemaResource_?:
     super.from-sub_ o --schema-resource=schema-resource
 
   actions/Map ::= {:}
@@ -415,15 +400,31 @@ It resets the json-pointer.
 It sets the URL for all contained schemas that are relative to the resource.
 */
 class SchemaResource_ extends SchemaObject_:
+  uri/UriReference
   vocabularies/Map
   dynamic-anchors/Set := {}
 
-  constructor o/Map:
+  constructor o/Map --parent/SchemaObject_?:
+    new-id := o.get "\$id"
+    // This is a resource schema.
+    // TODO(florian): get the "$schema".
+    if not new-id:
+      new-id = "urn:uuid:$(uuid.uuid5 "json-schema" "$Time.now.ns-since-epoch")"
+    // Empty fragments are allowed (but not recommended).
+    // Trim them.
+    new-id = new-id.trim --right "#"
+    new-uri := UriReference.parse new-id
+    if not new-uri.is-absolute:
+      new-uri = new-uri.resolve --base=parent.schema-resource.uri
+    new-uri = new-uri.normalize
+    this.uri = new-uri
+    // Instantiate the schema object with a resource set to null and then update it to itself.
     vocabularies = DEFAULT-VOCABULARIES
     super o --schema-resource=null
+    this.schema-resource = this
 
 class SchemaBool_ extends Schema:
-  constructor value/bool --schema-resource/SchemaObject_:
+  constructor value/bool --schema-resource/SchemaResource_:
     super.from-sub_ value --schema-resource=schema-resource
 
   validate o/any -> bool:
