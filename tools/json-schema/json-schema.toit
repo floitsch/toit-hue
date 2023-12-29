@@ -42,7 +42,8 @@ class VocabularyCore implements Vocabulary:
   add-actions --schema/SchemaObject_ --context/BuildContext --json-pointer/JsonPointer -> none:
     json := schema.json-value
     json.get "\$anchor" --if-present=: | anchor-id/string |
-      anchor-uri := context.uri.with-fragment (UriReference.normalize-fragment anchor-id)
+      normalized-fragment := UriReference.normalize-fragment anchor-id
+      anchor-uri := context.schema-resource-uri.with-fragment normalized-fragment
       context.store.add anchor-uri.to-string schema
 
     json.get "\$dynamicAnchor" --if-present=: | anchor-id/string |
@@ -51,7 +52,7 @@ class VocabularyCore implements Vocabulary:
     json.get "\$ref" --if-present=: | ref/string |
       reference := UriReference.parse ref
       reference = reference.normalize
-      target-uri := reference.resolve --base=context.uri
+      target-uri := reference.resolve --base=context.schema-resource-uri
       target := target-uri.to-string
       schema.add_ "\$ref" (ActionRef target)
 
@@ -318,9 +319,10 @@ DEFAULT-VOCABULARIES ::= {
 build o/any -> Schema:
   store := Store
   context := BuildContext
-      --vocabularies=DEFAULT-VOCABULARIES
+      --vocabularies={:}
       --store=store
-      --uri=null
+      --schema-resource-uri=null
+      --dynamic-anchors={}
   result := Schema.build_ o --context=context --json-pointer=JsonPointer --parent=null
   store.do: | _ schema/Schema |
     schema.resolve_ --store=context.store
@@ -329,8 +331,12 @@ build o/any -> Schema:
 abstract class Schema:
   json-value/any
   parent/SchemaObject_?
+  // The URI of the schema resource containing this Schema.
+  // A schema resource is the innermost Schema with an "$id" property.
+  schema-resource-uri/UriReference?
+  dynamic-anchors/Set? := null
 
-  constructor.from-sub_ .json-value --.parent:
+  constructor.from-sub_ .json-value --.parent --.schema-resource-uri:
 
   static build_ o/any --parent/SchemaObject_? --context/BuildContext --json-pointer/JsonPointer -> Schema:
     result/Schema := ?
@@ -339,9 +345,11 @@ abstract class Schema:
     else if o == false:
       result = SchemaFalse_ --parent=parent
     else:
-      schema-object := SchemaObject_ o --parent=parent
+      schema-object/SchemaObject_ := ?
       new-id := o.get "\$id"
-      if new-id or parent == null:
+      if not new-id and parent:
+        schema-object = SchemaObject_ o --parent=parent --schema-resource-uri=parent.schema-resource-uri
+      else:
         // This is a resource schema.
         // TODO(florian): get the "$schema".
         if not new-id:
@@ -351,20 +359,28 @@ abstract class Schema:
         new-id = new-id.trim --right "#"
         new-uri := UriReference.parse new-id
         if not new-uri.is-absolute:
-          new-uri = new-uri.resolve --base=context.uri
+          new-uri = new-uri.resolve --base=context.schema-resource-uri
         new-uri = new-uri.normalize
-        context = context.with --uri=new-uri
+        dynamic-anchors := {}
+        schema-object = SchemaObject_ o --parent=parent --schema-resource-uri=new-uri
+        schema-object.dynamic-anchors = dynamic-anchors
+        context = context.with
+            --schema-resource-uri=new-uri
+            --vocabularies=DEFAULT-VOCABULARIES
+            --dynamic-anchors=dynamic-anchors
         // Also add the schema without the '#' fragment.
         context.store.add new-uri.to-string schema-object
         // Reset the json-pointer.
         json-pointer = JsonPointer
 
-      result = schema-object
       context.vocabularies.do: | _ vocabulary/Vocabulary |
         vocabulary.add-actions --schema=schema-object --context=context --json-pointer=json-pointer
+
+      result = schema-object
+
     escaped-json-pointer := json-pointer.to-fragment-string
     escaped-json-pointer = UriReference.normalize-fragment escaped-json-pointer
-    schema-json-pointer-url := context.uri.with-fragment escaped-json-pointer
+    schema-json-pointer-url := context.schema-resource-uri.with-fragment escaped-json-pointer
     context.store.add schema-json-pointer-url.to-string result
     return result
 
@@ -374,8 +390,8 @@ abstract class Schema:
 class SchemaObject_ extends Schema:
   is-resolved/bool := false
 
-  constructor o/Map --parent/SchemaObject_?:
-    super.from-sub_ o --parent=parent
+  constructor o/Map --parent/SchemaObject_? --schema-resource-uri/UriReference:
+    super.from-sub_ o --parent=parent --schema-resource-uri=schema-resource-uri
 
   actions/Map ::= {:}
 
@@ -396,7 +412,7 @@ class SchemaObject_ extends Schema:
 
 class SchemaTrue_ extends Schema:
   constructor --parent/SchemaObject_?:
-    super.from-sub_ true --parent=parent
+    super.from-sub_ true --parent=parent --schema-resource-uri=parent.schema-resource-uri
 
   validate o/any -> bool:
     return true
@@ -406,7 +422,7 @@ class SchemaTrue_ extends Schema:
 
 class SchemaFalse_ extends Schema:
   constructor --parent/SchemaObject_?:
-    super.from-sub_ false --parent=parent
+    super.from-sub_ false --parent=parent --schema-resource-uri=parent.schema-resource-uri
 
   validate o/any -> bool:
     return false
@@ -418,12 +434,21 @@ class SchemaFalse_ extends Schema:
 class BuildContext:
   vocabularies/Map
   store/Store
-  uri/UriReference?
+  schema-resource-uri/UriReference?
+  dynamic-anchors/Set
 
-  constructor --.vocabularies --.store --.uri:
+  constructor --.vocabularies --.store --.schema-resource-uri --.dynamic-anchors:
 
-  with --uri/UriReference -> BuildContext:
-    return BuildContext --vocabularies=vocabularies --store=store --uri=uri
+  with -> BuildContext
+      --schema-resource-uri/UriReference=schema-resource-uri
+      --vocabularies/Map=vocabularies
+      --dynamic-anchors/Set=dynamic-anchors
+  :
+    return BuildContext
+        --vocabularies=vocabularies
+        --store=store
+        --schema-resource-uri=schema-resource-uri
+        --dynamic-anchors=dynamic-anchors
 
 class Store:
   entries_/Map ::= {:}
