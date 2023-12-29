@@ -331,9 +331,6 @@ build o/any -> Schema:
 abstract class Schema:
   json-value/any
   schema-resource/SchemaObject_? := ?
-  // The URI of the schema resource containing this Schema.
-  // A schema resource is the innermost Schema with an "$id" property.
-  dynamic-anchors/Set? := null
 
   constructor.from-sub_ .json-value --.schema-resource:
 
@@ -360,17 +357,18 @@ abstract class Schema:
         new-uri = new-uri.normalize
         dynamic-anchors := {}
         // Instantiate the schema object with a resource set to null and then update it to itself.
-        schema-object = SchemaObject_ o --schema-resource=null
-        schema-object.schema-resource = schema-object
-        schema-object.dynamic-anchors = dynamic-anchors
+        schema-resource := SchemaResource_ o
+        schema-resource.schema-resource = schema-resource
+        schema-resource.dynamic-anchors = dynamic-anchors
         context = context.with
             --schema-resource-uri=new-uri
             --vocabularies=DEFAULT-VOCABULARIES
             --dynamic-anchors=dynamic-anchors
         // Also add the schema without the '#' fragment.
-        context.store.add new-uri.to-string schema-object
+        context.store.add new-uri.to-string schema-resource
         // Reset the json-pointer.
         json-pointer = JsonPointer
+        schema-object = schema-resource
 
       context.vocabularies.do: | _ vocabulary/Vocabulary |
         vocabulary.add-actions --schema=schema-object --context=context --json-pointer=json-pointer
@@ -408,6 +406,21 @@ class SchemaObject_ extends Schema:
     actions.do: | keyword/string action/Action |
       if not action.validate o: return false
     return true
+
+/**
+A schema resource is a schema with an "$id" property.
+
+It defines which vocabulary is used.
+It resets the json-pointer.
+It sets the URL for all contained schemas that are relative to the resource.
+*/
+class SchemaResource_ extends SchemaObject_:
+  vocabularies/Map
+  dynamic-anchors/Set := {}
+
+  constructor o/Map:
+    vocabularies = DEFAULT-VOCABULARIES
+    super o --schema-resource=null
 
 class SchemaBool_ extends Schema:
   constructor value/bool --schema-resource/SchemaObject_:
