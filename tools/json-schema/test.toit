@@ -34,7 +34,7 @@ run-tests test-json/List:
     total-counter += entry["tests"].size
 
     print "  Running suite $entry["description"]"
-    schema/json-schema.Schema? := null
+    schema/json-schema.JsonSchema? := null
     exception := catch --trace:
       schema = json-schema.build entry["schema"]
     if exception:

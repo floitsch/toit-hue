@@ -47,17 +47,15 @@ class VocabularyCore implements Vocabulary:
       store.add anchor-uri.to-string schema
 
     json.get "\$dynamicAnchor" --if-present=: | anchor-id/string |
-      throw "unimplemented"
+      normalized-fragment := UriReference.normalize-fragment anchor-id
+      anchor-uri := schema.schema-resource.uri.with-fragment normalized-fragment
+      store.add --dynamic anchor-uri.to-string schema --fragment=normalized-fragment
 
     json.get "\$ref" --if-present=: | ref/string |
-      reference := UriReference.parse ref
-      reference = reference.normalize
-      target-uri := reference.resolve --base=schema.schema-resource.uri
-      target := target-uri.to-string
-      schema.add_ "\$ref" (ActionRef target)
+      schema.add_ "\$ref" (ActionRef ref --is-dynamic=false)
 
-    json.get "\$dynamicRef" --if-present=: | ref-id/string |
-      throw "unimplemented"
+    json.get "\$dynamicRef" --if-present=: | ref/string |
+      schema.add_ "\$dynamicRef" (ActionRef ref --is-dynamic)
 
     json.get "\$defs" --if-present=: | defs/Map |
       schema-defs := defs.map: | key/string value/any |
@@ -101,14 +99,14 @@ class VocabularyApplicator implements Vocabulary:
 
   map-schemas_ --list/List --parent/SchemaObject_? --store/Store --json-pointer/JsonPointer -> List:
     result := List list.size: | i/int |
-      sub-schema-json := list[i]
+      sub-schema-json/any := list[i]
       sub-pointer := json-pointer + "$i"
       // Building the schema will automatically add its json-pointer to the build context.
       Schema.build_ sub-schema-json --parent=parent --store=store --json-pointer=sub-pointer
     return result
 
   map-schemas_ --object/Map --parent/SchemaObject_? --store/Store --json-pointer/JsonPointer -> Map:
-    return object.map: | key/string sub-schema-json/Map |
+    return object.map: | key/string sub-schema-json/any |
       sub-pointer := json-pointer + key
       // Building the schema will automatically add its json-pointer to the build context.
       Schema.build_ sub-schema-json --parent=parent --store=store --json-pointer=sub-pointer
@@ -316,12 +314,21 @@ DEFAULT-VOCABULARIES ::= {
   VocabularyValidation.URI: VocabularyValidation,
 }
 
-build o/any -> Schema:
+build o/any -> JsonSchema:
   store := Store
   result := Schema.build_ o --store=store --json-pointer=JsonPointer --parent=null
   store.do: | _ schema/Schema |
     schema.resolve_ --store=store
-  return result
+  return JsonSchema result store
+
+class JsonSchema:
+  schema_/Schema
+  store_/Store
+
+  constructor .schema_ .store_:
+
+  validate o/any -> bool:
+    return schema_.validate_ o --store=store_ --dynamic-scope=[]
 
 abstract class Schema:
   json-value/any
@@ -358,7 +365,7 @@ abstract class Schema:
     return result
 
   abstract resolve_ --store/Store -> none
-  abstract validate o/any -> bool
+  abstract validate_ o/any --store/Store --dynamic-scope/List -> bool
 
 
 class SchemaObject_ extends Schema:
@@ -377,12 +384,23 @@ class SchemaObject_ extends Schema:
     is-resolved = true
     actions.do: | keyword/string action/Action |
       if action is ResolveableAction:
-        (action as ResolveableAction).resolve_ --store=store
+        (action as ResolveableAction).resolve_ --store=store --schema-resource=schema-resource
 
-  validate o/any -> bool:
-    actions.do: | keyword/string action/Action |
-      if not action.validate o: return false
+  validate_ o/any --store/Store --dynamic-scope/List -> bool:
+    with-updated-dynamic-scope_ dynamic-scope: | updated-scope/List |
+      actions.do: | keyword/string action/Action |
+        if not action.validate o --store=store --dynamic-scope=updated-scope: return false
     return true
+
+  with-updated-dynamic-scope_ dynamic-scope/List [block] -> none:
+    if dynamic-scope.is-empty or dynamic-scope.last != schema-resource:
+      try:
+        dynamic-scope.add schema-resource
+        block.call dynamic-scope
+      finally:
+        dynamic-scope.remove-last
+    else:
+      block.call dynamic-scope
 
 /**
 A schema resource is a schema with an "$id" property.
@@ -394,7 +412,6 @@ It sets the URL for all contained schemas that are relative to the resource.
 class SchemaResource_ extends SchemaObject_:
   uri/UriReference
   vocabularies/Map
-  dynamic-anchors/Set := {}
 
   constructor o/Map --parent/SchemaObject_?:
     new-id := o.get "\$id"
@@ -419,7 +436,7 @@ class SchemaBool_ extends Schema:
   constructor value/bool --schema-resource/SchemaResource_:
     super.from-sub_ value --schema-resource=schema-resource
 
-  validate o/any -> bool:
+  validate_ o/any --store/Store --dynamic-scope/List -> bool:
     return json-value
 
   resolve_ --store/Store -> none:
@@ -427,35 +444,81 @@ class SchemaBool_ extends Schema:
 
 class Store:
   entries_/Map ::= {:}
+  dynamic-entries_/Map ::= {:}
 
-  add id/string schema/Schema:
-    entries_[id] = schema
+  add uri/string schema/Schema:
+    entries_[uri] = schema
 
-  get id/string -> Schema?:
-    return entries_.get id
+  add --dynamic/bool uri/string schema/Schema --fragment/string:
+    entries_[uri] = schema
+    dynamic-entries_[uri] = fragment
+
+  get uri/string -> Schema?:
+    return entries_.get uri
+
+  get-dynamic-fragment uri/string -> string?:
+    return dynamic-entries_.get uri
 
   do [block] -> none:
     entries_.do block
 
 interface Action:
-  validate o/any -> bool
+  validate o/any --dynamic-scope/List --store/Store -> bool
 
 interface ResolveableAction extends Action:
-  resolve_ --store/Store -> none
+  resolve_ --schema-resource/SchemaResource_ --store/Store -> none
 
 class ActionRef implements ResolveableAction:
-  target/string
+  ref/string
   resolved_/Schema? := null
+  is-dynamic/bool := ?
+  dynamic-fragment/string? := null
 
-  constructor .target:
+  constructor .ref --.is-dynamic:
 
-  resolve_ --store/Store -> none:
-    resolved_ = store.get target
+  resolve_ --schema-resource/SchemaResource_ --store/Store -> none:
+    reference := (UriReference.parse ref).normalize
+    target-uri := reference.resolve --base=schema-resource.uri
+    target := target-uri.to-string
 
-  validate o/any -> bool:
-    if resolved_ == null:
-      throw "unimplemented: $target"
-    return resolved_.validate o
+    resolved := store.get target
+
+    if is-dynamic and resolved:
+      dynamic-fragment = store.get-dynamic-fragment target
+      // If a dynamic reference resolves to a non-dynamic anchor, then it
+      // behaves like a normal ref.
+      if not dynamic-fragment:
+        resolved_ = resolved
+        is-dynamic = false
+    else:
+      // If a dynamic-reference doesn't resolve to any scheme, then treat
+      // it like a non-dynamic reference.
+      is-dynamic = false
+      resolved_ = resolved
+
+  find-dynamic-schema_ --dynamic-scope/List --store/Store -> Schema:
+    dynamic-scope.do: | resource/SchemaResource_ |
+      dynamic-target-uri := resource.uri.with-fragment dynamic-fragment
+      dynamic-target := dynamic-target-uri.to-string
+      dynamic-target-schema := store.get dynamic-target
+      if not dynamic-target-schema:
+        continue.do
+      if not store.get-dynamic-fragment dynamic-target:
+        // Wasn't actually a dynamic target.
+        continue.do
+      return dynamic-target-schema
+    // We know that there is a dynamic anchor in the same resource.
+    // Otherwise we would have changed the dynamic reference to a static one.
+    throw "Dynamic reference withouth a dynamic target"
+
+  validate o/any --dynamic-scope/List --store/Store -> bool:
+    resolved/Schema? := is-dynamic
+        ? find-dynamic-schema_ --dynamic-scope=dynamic-scope --store=store
+        : resolved_
+
+    if resolved == null:
+      throw "unimplemented: $ref.to-string $is-dynamic"
+    return resolved.validate_ o --dynamic-scope=dynamic-scope --store=store
 
 class ActionMulti implements Action:
   static ALL-OF ::= 0
@@ -467,17 +530,17 @@ class ActionMulti implements Action:
 
   constructor --.kind .subschemas:
 
-  validate o/any -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> bool:
     if kind == ALL-OF:
       return subschemas.every: | subschema/Schema |
-        subschema.validate o
+        subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
     else if kind == ANY-OF:
       return subschemas.any: | subschema/Schema |
-        subschema.validate o
+        subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
     else if kind == ONE-OF:
       success-count := 0
       subschemas.do: | subschema/Schema |
-        if subschema.validate o:
+        if subschema.validate_ o --dynamic-scope=dynamic-scope --store=store:
           success-count++
       return success-count == 1
     else:
@@ -488,8 +551,8 @@ class ActionNot implements Action:
 
   constructor .subschema/Schema:
 
-  validate o/any -> bool:
-    return not subschema.validate o
+  validate o/any --dynamic-scope/List --store/Store -> bool:
+    return not subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
 
 class ActionIfThenElse implements Action:
   condition-subschema/Schema
@@ -498,23 +561,26 @@ class ActionIfThenElse implements Action:
 
   constructor .condition-subschema/Schema .then-subschema/Schema? .else-subschema/Schema?:
 
-  validate o/any -> bool:
-    if condition-subschema.validate o:
-      return then-subschema ? then-subschema.validate o : true
+  validate o/any --dynamic-scope/List --store/Store -> bool:
+    if condition-subschema.validate_ o --dynamic-scope=dynamic-scope --store=store:
+      if not then-subschema: return true
+      return then-subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
     else:
-      return else-subschema ? else-subschema.validate o : true
+      if not else-subschema: return true
+      return else-subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
 
 class ActionDependentSchemas implements Action:
   subschemas/Map
 
   constructor .subschemas/Map:
 
-  validate o/any -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> bool:
     if o is not Map: return true
     map := o as Map
     subschemas.do: | key/string subschema/Schema |
       map.get key --if-present=: | value/any |
-        if not subschema.validate o: return false
+        if not subschema.validate_ o --dynamic-scope=dynamic-scope --store=store:
+          return false
     return true
 
 class ActionProperties implements Action:
@@ -523,14 +589,16 @@ class ActionProperties implements Action:
 
   constructor --.properties --.additional:
 
-  validate o/any -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> bool:
     if o is not Map: return true
     map := o as Map
     map.do: | key/string value/any |
       if properties and properties.contains key:
-        if not properties[key].validate value: return false
+        if not properties[key].validate_ value --dynamic-scope=dynamic-scope --store=store:
+          return false
       else if additional:
-        if not additional.validate value: return false
+        if not additional.validate_ value --dynamic-scope=dynamic-scope --store=store:
+          return false
     return true
 
 class ActionPropertyNames implements Action:
@@ -538,11 +606,12 @@ class ActionPropertyNames implements Action:
 
   constructor .subschema/Schema:
 
-  validate o/any -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> bool:
     if o is not Map: return true
     map := o as Map
     map.do: | key/string _ |
-      if not subschema.validate key: return false
+      if not subschema.validate_ key --dynamic-scope=dynamic-scope --store=store:
+        return false
     return true
 
 class ActionContains implements Action:
@@ -552,12 +621,13 @@ class ActionContains implements Action:
 
   constructor .subschema/Schema --.min-contains --.max-contains:
 
-  validate o/any -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> bool:
     if o is not List: return true
     list := o as List
     success-count := 0
     list.do: | item/any |
-      if subschema.validate item: success-count++
+      if subschema.validate_ item --dynamic-scope=dynamic-scope --store=store:
+        success-count++
     if min-contains:
       if success-count < min-contains:
         return false
@@ -574,7 +644,7 @@ class ActionType implements Action:
 
   constructor .types/List:
 
-  validate o/any -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> bool:
     types.do: | type-string |
       if type-string == "null" and o == null: return true
       if type-string == "boolean" and o is bool: return true
@@ -620,7 +690,7 @@ class ActionEnum implements Action:
 
   constructor .values/List:
 
-  validate o/any -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> bool:
     values.do: | value |
       if structural-equals_ o value: return true
     return false
@@ -630,7 +700,7 @@ class ActionConst implements Action:
 
   constructor .value/any:
 
-  validate o/any -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> bool:
     return structural-equals_ o value
 
 class ActionNumComparison implements Action:
@@ -645,7 +715,7 @@ class ActionNumComparison implements Action:
 
   constructor .n/num --.kind:
 
-  validate o/any -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> bool:
     if o is not num: return true
     if kind == MULTIPLE-OF:
       return o % n == 0.0
@@ -666,7 +736,7 @@ class ActionStringLength implements Action:
 
   constructor --.min --.max:
 
-  validate o/any -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> bool:
     if o is not string: return true
     if min and o.size < min: return false
     if max and o.size > max: return false
@@ -678,7 +748,7 @@ class ActionArrayLength implements Action:
 
   constructor --.min --.max:
 
-  validate o/any -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> bool:
     if o is not List: return true
     if min and o.size < min: return false
     if max and o.size > max: return false
@@ -687,7 +757,7 @@ class ActionArrayLength implements Action:
 class ActionUniqueItems implements Action:
   constructor:
 
-  validate o/any -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> bool:
     if o is not List: return true
     list := o as List
     // For simplicity do an O(n^2) algorithm.
@@ -701,7 +771,7 @@ class ActionRequired implements Action:
 
   constructor .properties/List:
 
-  validate o/any -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> bool:
     if o is not Map: return true
     map := o as Map
     properties.do: | property |
@@ -714,12 +784,14 @@ class ActionItems implements Action:
 
   constructor --.prefix-items --.items:
 
-  validate o/any -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> bool:
     if o is not List: return true
     list := o as List
     for i := 0; i < list.size; i++:
       if prefix-items and i < prefix-items.size:
-        if not prefix-items[i].validate list[i]: return false
+        if not prefix-items[i].validate_ list[i] --dynamic-scope=dynamic-scope --store=store:
+          return false
       else if items:
-        if not items.validate list[i]: return false
+        if not items.validate_ --dynamic-scope=dynamic-scope --store=store list[i]:
+          return false
     return true
