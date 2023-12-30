@@ -6,6 +6,7 @@ https://json-schema.org/draft/2020-12/json-schema-core#name-the-vocabulary-keywo
 import uuid
 import .uri
 import .json-pointer
+import .regex as regex
 
 class Dialect:
   vocabularies_/Map
@@ -214,14 +215,20 @@ class VocabularyApplicator implements Vocabulary:
           --store=store
           --json-pointer=sub-pointer
 
-    if properties or additional-properties:
+    pattern-properties := json.get "patternProperties" --if-present=: | pattern-properties/Map |
+      sub-pointer := json-pointer + "patternProperties"
+      subschemas := map-schemas_
+          --object=pattern-properties
+          --parent=schema
+          --store=store
+          --json-pointer=sub-pointer
+
+    if properties or additional-properties or pattern-properties:
       action := ActionProperties
           --properties=properties
+          --patterns=pattern-properties
           --additional=additional-properties
       schema.add_ "properties" action
-
-    json.get "patternProperties" --if-present=: | pattern-properties/Map |
-      throw "Unimplemented"
 
     json.get "propertyNames" --if-present=: | property-names/any |
       sub-pointer := json-pointer + "propertyNames"
@@ -260,6 +267,10 @@ class VocabularyValidation implements Vocabulary:
     "maxItems",
     "minItems",
     "uniqueItems",
+    "minProperties",
+    "maxProperties",
+    "pattern",
+    "dependentRequired",
   ]
 
   uri -> string:
@@ -307,6 +318,17 @@ class VocabularyValidation implements Vocabulary:
 
     json.get "uniqueItems" --if-present=: | val/bool |
       if val: schema.add_ "uniqueItems" ActionUniqueItems
+
+    min-properties := int-value_ (json.get "minProperties")
+    max-properties := int-value_ (json.get "maxProperties")
+    if min-properties or max-properties:
+      schema.add_ "propertiesLength" (ActionObjectSize --min=min-properties --max=max-properties)
+
+    json.get "pattern" --if-present=: | pattern/string |
+      schema.add_ "pattern" (ActionPattern pattern)
+
+    json.get "dependentRequired" --if-present=: | dependent-required/Map |
+      schema.add_ "dependentRequired" (ActionDependentRequired dependent-required)
 
 DEFAULT-VOCABULARIES ::= {
   VocabularyCore.URI: VocabularyCore,
@@ -517,7 +539,8 @@ class ActionRef implements ResolveableAction:
         : resolved_
 
     if resolved == null:
-      throw "unimplemented: $ref.to-string $is-dynamic"
+      // TODO(florian): what should this do?
+      return false
     return resolved.validate_ o --dynamic-scope=dynamic-scope --store=store
 
 class ActionMulti implements Action:
@@ -586,17 +609,37 @@ class ActionDependentSchemas implements Action:
 class ActionProperties implements Action:
   properties/Map?
   additional/Schema?
+  patterns/Map?
+  cached-regexs_/Map?
 
-  constructor --.properties --.additional:
+  constructor --.properties --.additional --.patterns:
+    if patterns:
+      cached := {:}
+      patterns.do: | pattern/string _ |
+        cached[pattern] = regex.parse pattern
+      cached-regexs_ = cached
+    else:
+      cached-regexs_ = null
+
 
   validate o/any --dynamic-scope/List --store/Store -> bool:
     if o is not Map: return true
     map := o as Map
     map.do: | key/string value/any |
+      is-additional := true
       if properties and properties.contains key:
+        is-additional = false
         if not properties[key].validate_ value --dynamic-scope=dynamic-scope --store=store:
           return false
-      else if additional:
+      if patterns:
+        patterns.do: | pattern/string schema/Schema |
+          regex := cached-regexs_[pattern]
+          if regex.match key:
+            is-additional = false
+            if not schema.validate_ value --dynamic-scope=dynamic-scope --store=store:
+              return false
+
+      if is-additional and additional:
         if not additional.validate_ value --dynamic-scope=dynamic-scope --store=store:
           return false
     return true
@@ -738,8 +781,10 @@ class ActionStringLength implements Action:
 
   validate o/any --dynamic-scope/List --store/Store -> bool:
     if o is not string: return true
-    if min and o.size < min: return false
-    if max and o.size > max: return false
+    str := o as string
+    rune-size := str.size --runes
+    if min and rune-size < min: return false
+    if max and rune-size > max: return false
     return true
 
 class ActionArrayLength implements Action:
@@ -778,6 +823,19 @@ class ActionRequired implements Action:
       if not map.contains property: return false
     return true
 
+class ActionObjectSize implements Action:
+  min/int?
+  max/int?
+
+  constructor --.min --.max:
+
+  validate o/any --dynamic-scope/List --store/Store -> bool:
+    if o is not Map: return true
+    map := o as Map
+    if min and map.size < min: return false
+    if max and map.size > max: return false
+    return true
+
 class ActionItems implements Action:
   prefix-items/List?
   items/Schema?
@@ -794,4 +852,29 @@ class ActionItems implements Action:
       else if items:
         if not items.validate_ --dynamic-scope=dynamic-scope --store=store list[i]:
           return false
+    return true
+
+class ActionPattern implements Action:
+  pattern/string
+  regex_/regex.Regex
+
+  constructor .pattern:
+    regex_ = regex.parse pattern
+
+  validate o/any --dynamic-scope/List --store/Store -> bool:
+    if o is not string: return true
+    return regex_.match o
+
+class ActionDependentRequired implements Action:
+  properties/Map
+
+  constructor .properties/Map:
+
+  validate o/any --dynamic-scope/List --store/Store -> bool:
+    if o is not Map: return true
+    map := o as Map
+    properties.do: | key/string required/List |
+      if map.contains key:
+        required.do: | property |
+          if not map.contains property: return false
     return true

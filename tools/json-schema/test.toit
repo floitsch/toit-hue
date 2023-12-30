@@ -18,22 +18,28 @@ main args:
     while entry := stream.next:
       file-path := "$tests/$entry"
       if file.is-file file-path:
-        print "Running $entry"
-        test-json := json.decode (file.read-content file-path)
-        run-tests test-json
+        run-test-file file-path
     stream.close
   print "Success: $success-counter/$total-counter"
 
 run-test-file file-path/string:
-  print "Running $file-path"
   test-json := json.decode (file.read-content file-path)
-  run-tests test-json
+  already-printed := false
+  run-tests test-json --print-header=:
+    if not already-printed:
+      already-printed = true
+      print "Running $file-path"
 
-run-tests test-json/List:
+run-tests test-json/List [--print-header]:
   test-json.do: | entry/Map |
     total-counter += entry["tests"].size
 
-    print "  Running suite $entry["description"]"
+    already-printed-suite := false
+    print-suite := :
+      if not already-printed-suite:
+        already-printed-suite = true
+        print-header.call
+        print "  Running suite $entry["description"]"
     schema/json-schema.JsonSchema? := null
     exception := catch --trace:
       schema = json-schema.build entry["schema"]
@@ -42,10 +48,12 @@ run-tests test-json/List:
       continue.do
     else:
     entry["tests"].do: | test/Map |
-      print "    Running test $test["description"]"
       result := null
       test-exception := catch --trace:
         result = schema.validate test["data"]
       if test-exception: result = not test["valid"]
       if test["valid"] == result: success-counter++
-      print "      Test result: $result - $(test["valid"] == result ? "OK" : "FAIL")"
+      if test["valid"] != result:
+        print-suite.call
+        print "    Running test $test["description"]"
+        print "      Test result: $result - $(test["valid"] == result ? "OK" : "FAIL")"
