@@ -3,6 +3,10 @@ An implementation of the JSON Schema Specification Draft 2022-12.
 https://json-schema.org/draft/2020-12/json-schema-core#name-the-vocabulary-keyword
 */
 
+import certificate-roots
+import http
+import encoding.json
+import net
 import uuid
 import .uri
 import .json-pointer
@@ -40,6 +44,10 @@ class VocabularyCore implements Vocabulary:
   keywords -> List:
     return KEYWORDS
 
+  static resolve-ref_ ref/string --schema-resource/SchemaResource_ -> UriReference:
+    reference := (UriReference.parse ref).normalize
+    return reference.resolve --base=schema-resource.uri
+
   add-actions --schema/SchemaObject_ --store/Store --json-pointer/JsonPointer -> none:
     json := schema.json-value
     json.get "\$anchor" --if-present=: | anchor-id/string |
@@ -53,15 +61,21 @@ class VocabularyCore implements Vocabulary:
       store.add --dynamic anchor-uri.to-string schema --fragment=normalized-fragment
 
     json.get "\$ref" --if-present=: | ref/string |
-      schema.add_ "\$ref" (ActionRef ref --is-dynamic=false)
+      target-uri := resolve-ref_ ref --schema-resource=schema.schema-resource
+      requested-resource := target-uri.with-fragment null
+      store.add-requested-resource-url requested-resource.to-string
+      schema.add_ "\$ref" (ActionRef --target-uri=target-uri --is-dynamic=false)
 
     json.get "\$dynamicRef" --if-present=: | ref/string |
-      schema.add_ "\$dynamicRef" (ActionRef ref --is-dynamic)
+      target-uri := resolve-ref_ ref --schema-resource=schema.schema-resource
+      requested-resource := target-uri.with-fragment null
+      store.add-requested-resource-url requested-resource.to-string
+      schema.add_ "\$ref" (ActionRef --target-uri=target-uri --is-dynamic)
 
     json.get "\$defs" --if-present=: | defs/Map |
       schema-defs := defs.map: | key/string value/any |
         sub-pointer := json-pointer + "\$defs" + key
-        // Building the schema will automatically add its json-pointer to the build context.
+        // Building the schema will automatically add its json-pointer to the store.
         Schema.build_ value --parent=schema --store=store --json-pointer=sub-pointer
 
 
@@ -102,14 +116,14 @@ class VocabularyApplicator implements Vocabulary:
     result := List list.size: | i/int |
       sub-schema-json/any := list[i]
       sub-pointer := json-pointer + "$i"
-      // Building the schema will automatically add its json-pointer to the build context.
+      // Building the schema will automatically add its json-pointer to the store.
       Schema.build_ sub-schema-json --parent=parent --store=store --json-pointer=sub-pointer
     return result
 
   map-schemas_ --object/Map --parent/SchemaObject_? --store/Store --json-pointer/JsonPointer -> Map:
     return object.map: | key/string sub-schema-json/any |
       sub-pointer := json-pointer + key
-      // Building the schema will automatically add its json-pointer to the build context.
+      // Building the schema will automatically add its json-pointer to the store.
       Schema.build_ sub-schema-json --parent=parent --store=store --json-pointer=sub-pointer
 
   add-actions --schema/SchemaObject_ --store/Store --json-pointer/JsonPointer -> none:
@@ -131,27 +145,27 @@ class VocabularyApplicator implements Vocabulary:
 
     json.get "not" --if-present=: | not-entry/any |
       sub-pointer := json-pointer + "not"
-      // Building the schema will automatically add its json-pointer to the build context.
+      // Building the schema will automatically add its json-pointer to the store.
       subschema := Schema.build_ not-entry --parent=schema --store=store --json-pointer=sub-pointer
       schema.add_ "not" (ActionNot subschema)
 
     condition-subschema/Schema? := json.get "if" --if-present=: | if-entry/any |
       condition-sub-pointer := json-pointer + "if"
-      // Building the schema will automatically add its json-pointer to the build context.
+      // Building the schema will automatically add its json-pointer to the store.
       Schema.build_ if-entry --parent=schema --store=store --json-pointer=condition-sub-pointer
 
     // We build the then subschema even if there is no 'if', in case
     // the subschema is referenced.
     then-subschema/Schema? := json.get "then" --if-present=: | then-entry/any |
       then-sub-pointer := json-pointer + "then"
-      // Building the schema will automatically add its json-pointer to the build context.
+      // Building the schema will automatically add its json-pointer to the store.
       Schema.build_ then-entry --parent=schema --store=store --json-pointer=then-sub-pointer
 
     // We build the 'else' subschema even if there is no 'if', in case
     // the subschema is referenced.
     else-subschema/Schema? := json.get "else" --if-present=: | else-entry/any |
       else-sub-pointer := json-pointer + "else"
-      // Building the schema will automatically add its json-pointer to the build context.
+      // Building the schema will automatically add its json-pointer to the store.
       Schema.build_ else-entry --parent=schema --store=store --json-pointer=else-sub-pointer
 
     if condition-subschema:
@@ -176,7 +190,7 @@ class VocabularyApplicator implements Vocabulary:
 
     items := json.get "items" --if-present=: | items/any |
       sub-pointer := json-pointer + "items"
-      // Building the schema will automatically add its json-pointer to the build context.
+      // Building the schema will automatically add its json-pointer to the store.
       subschema := Schema.build_ items
           --parent=schema
           --store=store
@@ -191,7 +205,7 @@ class VocabularyApplicator implements Vocabulary:
       min-contains := supports-min-max ? int-value_ (json.get "minContains") : null
       max-contains := supports-min-max ? int-value_ (json.get "maxContains") : null
 
-      // Building the schema will automatically add its json-pointer to the build context.
+      // Building the schema will automatically add its json-pointer to the store.
       subschema := Schema.build_ contains
           --parent=schema
           --store=store
@@ -209,7 +223,7 @@ class VocabularyApplicator implements Vocabulary:
 
     additional-properties := json.get "additionalProperties" --if-present=: | additional-properties/any |
       sub-pointer := json-pointer + "additionalProperties"
-      // Building the schema will automatically add its json-pointer to the build context.
+      // Building the schema will automatically add its json-pointer to the store.
       subschema := Schema.build_ additional-properties
           --parent=schema
           --store=store
@@ -232,7 +246,7 @@ class VocabularyApplicator implements Vocabulary:
 
     json.get "propertyNames" --if-present=: | property-names/any |
       sub-pointer := json-pointer + "propertyNames"
-      // Building the schema will automatically add its json-pointer to the build context.
+      // Building the schema will automatically add its json-pointer to the store.
       subschema := Schema.build_ property-names
           --parent=schema
           --store=store
@@ -336,12 +350,44 @@ DEFAULT-VOCABULARIES ::= {
   VocabularyValidation.URI: VocabularyValidation,
 }
 
-build o/any -> JsonSchema:
+interface ResourceLoader:
+  load url/string -> any
+
+class HttpResourceLoader implements ResourceLoader:
+  constructor:
+    certificate-roots.install-all-trusted-roots
+
+  load url/string -> any:
+    network := net.open
+    client/http.Client? := null
+    try:
+      client = http.Client network
+      response := client.get --uri=url
+      if response.status-code != 200:
+        throw "HTTP error: $response.status-code $response.status-message"
+      result := json.decode-stream response.body
+      while response.body.read: null
+      return result
+    finally:
+      if client: client.close
+      network.close
+
+build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
   store := Store
-  result := Schema.build_ o --store=store --json-pointer=JsonPointer --parent=null
+  root-schema := Schema.build_ o --store=store --json-pointer=JsonPointer --parent=null
+
+  while store.has-missing-resources:
+    store.do-missing-resources: | url/string |
+      resource-json := resource-loader.load url
+      // Building the schema will automatically add its json-pointer to the store.
+      schema := Schema.build_ resource-json --store=store --json-pointer=JsonPointer --parent=null
+      // The ID of the schema could be different than the URL.
+      store.add url schema
+      store.add-resource-url url
+
   store.do: | _ schema/Schema |
     schema.resolve_ --store=store
-  return JsonSchema result store
+  return JsonSchema root-schema store
 
 class JsonSchema:
   schema_/Schema
@@ -371,6 +417,7 @@ abstract class Schema:
         schema-resource := SchemaResource_ o --parent=parent
         // Also add the schema without the '#' fragment.
         store.add schema-resource.uri.to-string schema-resource
+        store.add-resource-url schema-resource.uri.to-string
         // Reset the json-pointer.
         json-pointer = JsonPointer
         schema-object = schema-resource
@@ -406,7 +453,7 @@ class SchemaObject_ extends Schema:
     is-resolved = true
     actions.do: | keyword/string action/Action |
       if action is ResolveableAction:
-        (action as ResolveableAction).resolve_ --store=store --schema-resource=schema-resource
+        (action as ResolveableAction).resolve_ --store=store
 
   validate_ o/any --store/Store --dynamic-scope/List -> bool:
     with-updated-dynamic-scope_ dynamic-scope: | updated-scope/List |
@@ -468,6 +515,9 @@ class Store:
   entries_/Map ::= {:}
   dynamic-entries_/Map ::= {:}
 
+  resource-urls_/Set ::= {}
+  requested-resource-urls_/Set ::= {}
+
   add uri/string schema/Schema:
     entries_[uri] = schema
 
@@ -484,25 +534,39 @@ class Store:
   do [block] -> none:
     entries_.do block
 
+  add-resource-url url/string -> none:
+    resource-urls_.add url
+
+  add-requested-resource-url url/string -> none:
+    requested-resource-urls_.add url
+
+  has-missing-resources -> bool:
+    requested-resource-urls_.do: | url/string |
+      if not resource-urls_.contains url:
+        return true
+    return false
+
+  do-missing-resources [block] -> none:
+    requested-resource-urls_.do: | url/string |
+      if not resource-urls_.contains url:
+        block.call url
+
 interface Action:
   validate o/any --dynamic-scope/List --store/Store -> bool
 
 interface ResolveableAction extends Action:
-  resolve_ --schema-resource/SchemaResource_ --store/Store -> none
+  resolve_ --store/Store -> none
 
 class ActionRef implements ResolveableAction:
-  ref/string
+  target-uri/UriReference
   resolved_/Schema? := null
   is-dynamic/bool := ?
   dynamic-fragment/string? := null
 
-  constructor .ref --.is-dynamic:
+  constructor --.target-uri --.is-dynamic:
 
-  resolve_ --schema-resource/SchemaResource_ --store/Store -> none:
-    reference := (UriReference.parse ref).normalize
-    target-uri := reference.resolve --base=schema-resource.uri
+  resolve_ --store/Store -> none:
     target := target-uri.to-string
-
     resolved := store.get target
 
     if is-dynamic and resolved:

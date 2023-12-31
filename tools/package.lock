@@ -1,5 +1,6 @@
-sdk: ^2.0.0-alpha.79
+sdk: ^2.0.0-alpha.91
 prefixes:
+  certificate_roots: toit-cert-roots
   host: pkg-host
   http: pkg-http
 packages:
@@ -13,3 +14,8 @@ packages:
     name: http
     version: 2.3.0
     hash: 05ce2065a75813138d2c4ca1bab03e7a6f0541a2
+  toit-cert-roots:
+    url: github.com/toitware/toit-cert-roots
+    name: certificate_roots
+    version: 1.6.1
+    hash: 55d3be82ed53d8d332338b2de931865cf69fe48b
