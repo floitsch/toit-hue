@@ -62,15 +62,15 @@ class VocabularyCore implements Vocabulary:
 
     json.get "\$ref" --if-present=: | ref/string |
       target-uri := resolve-ref_ ref --schema-resource=schema.schema-resource
-      action := ActionRef --target-uri=target-uri --is-dynamic=false
-      context.refs.add action
-      schema.add_ "\$ref" action
+      applicator := Ref --target-uri=target-uri --is-dynamic=false
+      context.refs.add applicator
+      schema.add-applicator applicator
 
     json.get "\$dynamicRef" --if-present=: | ref/string |
       target-uri := resolve-ref_ ref --schema-resource=schema.schema-resource
-      action := ActionRef --target-uri=target-uri --is-dynamic
-      context.refs.add action
-      schema.add_ "\$ref" action
+      applicator := Ref --target-uri=target-uri --is-dynamic
+      context.refs.add applicator
+      schema.add-applicator applicator
 
     json.get "\$defs" --if-present=: | defs/Map |
       schema-defs := defs.map: | key/string value/any |
@@ -136,17 +136,17 @@ class VocabularyApplicator implements Vocabulary:
             --context=context
             --json-pointer=json-pointer + keyword
         kind/int := ?
-        if keyword == "allOf": kind = ActionMulti.ALL-OF
-        else if keyword == "anyOf": kind = ActionMulti.ANY-OF
-        else if keyword == "oneOf": kind = ActionMulti.ONE-OF
+        if keyword == "allOf": kind = X-Of.ALL-OF
+        else if keyword == "anyOf": kind = X-Of.ANY-OF
+        else if keyword == "oneOf": kind = X-Of.ONE-OF
         else: throw "unreachable"
-        schema.add_ keyword (ActionMulti --kind=kind subschemas)
+        schema.add-applicator (X-Of --kind=kind subschemas)
 
     json.get "not" --if-present=: | not-entry/any |
       sub-pointer := json-pointer + "not"
       // Building the schema will automatically add its json-pointer to the store.
       subschema := Schema.build_ not-entry --parent=schema --context=context --json-pointer=sub-pointer
-      schema.add_ "not" (ActionNot subschema)
+      schema.add-applicator (Not subschema)
 
     condition-subschema/Schema? := json.get "if" --if-present=: | if-entry/any |
       condition-sub-pointer := json-pointer + "if"
@@ -168,7 +168,7 @@ class VocabularyApplicator implements Vocabulary:
       Schema.build_ else-entry --parent=schema --context=context --json-pointer=else-sub-pointer
 
     if condition-subschema:
-      schema.add_ "if" (ActionIfThenElse condition-subschema then-subschema else-subschema)
+      schema.add-applicator (IfThenElse condition-subschema then-subschema else-subschema)
 
     json.get "dependentSchemas" --if-present=: | dependent-schemas/Map |
       sub-pointer := json-pointer + "dependentSchemas"
@@ -177,7 +177,7 @@ class VocabularyApplicator implements Vocabulary:
           --parent=schema
           --context=context
           --json-pointer=sub-pointer
-      schema.add_ "dependentSchemas" (ActionDependentSchemas subschemas)
+      schema.add-applicator (DependentSchemas subschemas)
 
     prefix-items := json.get "prefixItems" --if-present=: | prefix-items/List |
       sub-pointer := json-pointer + "prefixItems"
@@ -196,7 +196,7 @@ class VocabularyApplicator implements Vocabulary:
           --json-pointer=sub-pointer
 
     if prefix-items or items:
-      schema.add_ "items" (ActionItems --prefix-items=prefix-items --items=items)
+      schema.add-applicator (Items --prefix-items=prefix-items --items=items)
 
     json.get "contains" --if-present=: | contains/any |
       sub-pointer := json-pointer + "contains"
@@ -209,8 +209,7 @@ class VocabularyApplicator implements Vocabulary:
           --parent=schema
           --context=context
           --json-pointer=sub-pointer
-      schema.add_ "contains"
-          ActionContains subschema --min-contains=min-contains --max-contains=max-contains
+      schema.add-applicator (Contains subschema --min-contains=min-contains --max-contains=max-contains)
 
     properties := json.get "properties" --if-present=: | properties/Map |
       sub-pointer := json-pointer + "properties"
@@ -237,11 +236,11 @@ class VocabularyApplicator implements Vocabulary:
           --json-pointer=sub-pointer
 
     if properties or additional-properties or pattern-properties:
-      action := ActionProperties
+      applicator := Properties
           --properties=properties
           --patterns=pattern-properties
           --additional=additional-properties
-      schema.add_ "properties" action
+      schema.add-applicator applicator
 
     json.get "propertyNames" --if-present=: | property-names/any |
       sub-pointer := json-pointer + "propertyNames"
@@ -250,7 +249,7 @@ class VocabularyApplicator implements Vocabulary:
           --parent=schema
           --context=context
           --json-pointer=sub-pointer
-      schema.add_ "propertyNames" (ActionPropertyNames subschema)
+      schema.add-applicator (PropertyNames subschema)
 
 
 // class VocabularyUnevaluated implements Vocabulary:
@@ -297,51 +296,51 @@ class VocabularyValidation implements Vocabulary:
 
     json.get "type" --if-present=: | type/any |
       if type is string: type = [type]
-      schema.add_ "type" (ActionType type)
+      schema.add-assertion (Type type)
 
     json.get "enum" --if-present=: | enum-values/any |
-      schema.add_ "enum" (ActionEnum enum-values)
+      schema.add-assertion (Enum enum-values)
 
     json.get "const" --if-present=: | value/any |
-      schema.add_ "const" (ActionConst value)
+      schema.add-assertion (Const value)
 
     ["multipleOf", "maximum", "exclusiveMaximum", "minimum", "exclusiveMinimum"].do: | keyword/string |
       json.get keyword --if-present=: | n/num |
         kind/int := ?
-        if keyword == "multipleOf": kind = ActionNumComparison.MULTIPLE-OF
-        else if keyword == "maximum": kind = ActionNumComparison.MAXIMUM
-        else if keyword == "exclusiveMaximum": kind = ActionNumComparison.EXCLUSIVE-MAXIMUM
-        else if keyword == "minimum": kind = ActionNumComparison.MINIMUM
-        else if keyword == "exclusiveMinimum": kind = ActionNumComparison.EXCLUSIVE-MINIMUM
+        if keyword == "multipleOf": kind = NumComparison.MULTIPLE-OF
+        else if keyword == "maximum": kind = NumComparison.MAXIMUM
+        else if keyword == "exclusiveMaximum": kind = NumComparison.EXCLUSIVE-MAXIMUM
+        else if keyword == "minimum": kind = NumComparison.MINIMUM
+        else if keyword == "exclusiveMinimum": kind = NumComparison.EXCLUSIVE-MINIMUM
         else: throw "unreachable"
-        schema.add_ keyword (ActionNumComparison --kind=kind n)
+        schema.add-assertion (NumComparison --kind=kind n)
 
     json.get "required" --if-present=: | required-properties/List |
-      schema.add_ "required" (ActionRequired required-properties)
+      schema.add-assertion (Required required-properties)
 
     min-length := int-value_ (json.get "minLength")
     max-length := int-value_ (json.get "maxLength")
     if min-length or max-length:
-      schema.add_ "stringLength" (ActionStringLength --min=min-length --max=max-length)
+      schema.add-assertion (StringLength --min=min-length --max=max-length)
 
     min-items := int-value_ (json.get "minItems")
     max-items := int-value_ (json.get "maxItems")
     if min-items or max-items:
-      schema.add_ "arrayLength" (ActionArrayLength --min=min-items --max=max-items)
+      schema.add-assertion (ArrayLength --min=min-items --max=max-items)
 
     json.get "uniqueItems" --if-present=: | val/bool |
-      if val: schema.add_ "uniqueItems" ActionUniqueItems
+      if val: schema.add-assertion UniqueItems
 
     min-properties := int-value_ (json.get "minProperties")
     max-properties := int-value_ (json.get "maxProperties")
     if min-properties or max-properties:
-      schema.add_ "propertiesLength" (ActionObjectSize --min=min-properties --max=max-properties)
+      schema.add-assertion (ObjectSize --min=min-properties --max=max-properties)
 
     json.get "pattern" --if-present=: | pattern/string |
-      schema.add_ "pattern" (ActionPattern pattern)
+      schema.add-assertion (Pattern pattern)
 
     json.get "dependentRequired" --if-present=: | dependent-required/Map |
-      schema.add_ "dependentRequired" (ActionDependentRequired dependent-required)
+      schema.add-assertion (DependentRequired dependent-required)
 
 DEFAULT-VOCABULARIES ::= {
   VocabularyCore.URI: VocabularyCore,
@@ -380,7 +379,7 @@ build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
   while not context.refs.is-empty:
     pending := context.refs
     context.refs = []
-    pending.do: | ref/ActionRef |
+    pending.do: | ref/Ref |
       target-uri := ref.target-uri
       target := target-uri.to-string
       resolved := store.get target
@@ -402,18 +401,6 @@ build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
       dynamic-fragment := store.get-dynamic-fragment target
       ref.set-target resolved --dynamic-fragment=dynamic-fragment
 
-
-  // while store.has-missing-resources:
-  //   store.do-missing-resources: | url/string |
-  //     resource-json := resource-loader.load url
-  //     store.add-downloaded-url url
-  //     // Building the schema will automatically add its json-pointer to the store.
-  //     schema := Schema.build_ resource-json --context=context --json-pointer=JsonPointer --parent=null
-  //     // The ID of the schema could be different than the URL.
-  //     store.add url schema
-
-  // store.do: | _ schema/Schema |
-  //   schema.resolve_ --store=store
   return JsonSchema root-schema store
 
 class JsonSchema:
@@ -464,19 +451,28 @@ abstract class Schema:
 
 class SchemaObject_ extends Schema:
   is-resolved/bool := false
+  is-sorted_/bool := false
 
   constructor o/Map --schema-resource/SchemaResource_?:
     super.from-sub_ o --schema-resource=schema-resource
 
-  actions/Map ::= {:}
+  actions/List ::= []
 
-  add_ keyword/string action/Action:
-    actions[keyword] = action
+  add-applicator applicator/Applicator:
+    actions.add applicator
+
+  add-assertion assertion/Assertion:
+    actions.add assertion
 
   validate_ o/any --store/Store --dynamic-scope/List -> bool:
+    if not is-sorted_:
+      actions.sort --in-place: | a/Action b/Action | a.order.compare-to b.order
+      is-sorted_ = true
+
     with-updated-dynamic-scope_ dynamic-scope: | updated-scope/List |
-      actions.do: | keyword/string action/Action |
+      actions.do: | action/Action |
         if not action.validate o --store=store --dynamic-scope=updated-scope: return false
+
     return true
 
   with-updated-dynamic-scope_ dynamic-scope/List [block] -> none:
@@ -552,10 +548,36 @@ class Store:
   do [block] -> none:
     entries_.do block
 
-interface Action:
-  validate o/any --dynamic-scope/List --store/Store -> bool
+abstract class Action:
+  static ORDER-EARLY ::= 20
+  static ORDER-DEFAULT ::= 50
+  static ORDER-LATE ::= 70
 
-class ActionRef implements Action:
+  /**
+  The order/precedence of the action.
+
+  An action with a lower order is executed before an action with a higher order.
+  This can be used to ensure that certain actions are executed before others.
+
+  Typically, actions that are fast to execute should be executed first, so that their failure
+    short-circuits the validation.
+
+  Applicators should never run after ORDER-LATE, as the $Properties and $Items applicators
+    are run at that level and need to know whether subschemas have evaluated properties/items.
+  */
+  abstract order -> int
+
+  abstract validate o/any --dynamic-scope/List --store/Store -> bool
+
+abstract class Applicator extends Action:
+  order -> int:
+    return Action.ORDER-DEFAULT
+
+abstract class Assertion extends Action:
+  order -> int:
+    return Action.ORDER-EARLY
+
+class Ref extends Applicator:
   target-uri/UriReference
   resolved_/Schema? := null
   is-dynamic/bool := ?
@@ -597,7 +619,7 @@ class ActionRef implements Action:
       return false
     return resolved.validate_ o --dynamic-scope=dynamic-scope --store=store
 
-class ActionMulti implements Action:
+class X-Of extends Applicator:
   static ALL-OF ::= 0
   static ANY-OF ::= 1
   static ONE-OF ::= 2
@@ -623,7 +645,7 @@ class ActionMulti implements Action:
     else:
       throw "unreachable"
 
-class ActionNot implements Action:
+class Not extends Applicator:
   subschema/Schema
 
   constructor .subschema/Schema:
@@ -631,7 +653,7 @@ class ActionNot implements Action:
   validate o/any --dynamic-scope/List --store/Store -> bool:
     return not subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
 
-class ActionIfThenElse implements Action:
+class IfThenElse extends Applicator:
   condition-subschema/Schema
   then-subschema/Schema?
   else-subschema/Schema?
@@ -646,7 +668,7 @@ class ActionIfThenElse implements Action:
       if not else-subschema: return true
       return else-subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
 
-class ActionDependentSchemas implements Action:
+class DependentSchemas extends Applicator:
   subschemas/Map
 
   constructor .subschemas/Map:
@@ -660,7 +682,7 @@ class ActionDependentSchemas implements Action:
           return false
     return true
 
-class ActionProperties implements Action:
+class Properties extends Applicator:
   properties/Map?
   additional/Schema?
   patterns/Map?
@@ -698,7 +720,10 @@ class ActionProperties implements Action:
           return false
     return true
 
-class ActionPropertyNames implements Action:
+  order -> int:
+    return Action.ORDER-LATE
+
+class PropertyNames extends Applicator:
   subschema/Schema
 
   constructor .subschema/Schema:
@@ -711,7 +736,7 @@ class ActionPropertyNames implements Action:
         return false
     return true
 
-class ActionContains implements Action:
+class Contains extends Applicator:
   subschema/Schema
   min-contains/int?
   max-contains/int?
@@ -736,7 +761,7 @@ class ActionContains implements Action:
 
     return true
 
-class ActionType implements Action:
+class Type extends Assertion:
   types/List
 
   constructor .types/List:
@@ -782,7 +807,7 @@ structural-equals_ a/any b/any -> bool:
 
   return false
 
-class ActionEnum implements Action:
+class Enum extends Assertion:
   values/List
 
   constructor .values/List:
@@ -792,7 +817,7 @@ class ActionEnum implements Action:
       if structural-equals_ o value: return true
     return false
 
-class ActionConst implements Action:
+class Const extends Assertion:
   value/any
 
   constructor .value/any:
@@ -800,7 +825,7 @@ class ActionConst implements Action:
   validate o/any --dynamic-scope/List --store/Store -> bool:
     return structural-equals_ o value
 
-class ActionNumComparison implements Action:
+class NumComparison extends Assertion:
   static MULTIPLE-OF ::= 0
   static MAXIMUM ::= 1
   static EXCLUSIVE-MAXIMUM ::= 2
@@ -827,7 +852,7 @@ class ActionNumComparison implements Action:
     else:
       throw "unreachable"
 
-class ActionStringLength implements Action:
+class StringLength extends Assertion:
   min/int?
   max/int?
 
@@ -841,7 +866,7 @@ class ActionStringLength implements Action:
     if max and rune-size > max: return false
     return true
 
-class ActionArrayLength implements Action:
+class ArrayLength extends Assertion:
   min/int?
   max/int?
 
@@ -853,7 +878,7 @@ class ActionArrayLength implements Action:
     if max and o.size > max: return false
     return true
 
-class ActionUniqueItems implements Action:
+class UniqueItems extends Assertion:
   constructor:
 
   validate o/any --dynamic-scope/List --store/Store -> bool:
@@ -865,7 +890,7 @@ class ActionUniqueItems implements Action:
         if structural-equals_ list[i] list[j]: return false
     return true
 
-class ActionRequired implements Action:
+class Required extends Assertion:
   properties/List
 
   constructor .properties/List:
@@ -877,7 +902,7 @@ class ActionRequired implements Action:
       if not map.contains property: return false
     return true
 
-class ActionObjectSize implements Action:
+class ObjectSize extends Assertion:
   min/int?
   max/int?
 
@@ -890,7 +915,7 @@ class ActionObjectSize implements Action:
     if max and map.size > max: return false
     return true
 
-class ActionItems implements Action:
+class Items extends Applicator:
   prefix-items/List?
   items/Schema?
 
@@ -908,7 +933,7 @@ class ActionItems implements Action:
           return false
     return true
 
-class ActionPattern implements Action:
+class Pattern extends Assertion:
   pattern/string
   regex_/regex.Regex
 
@@ -919,7 +944,7 @@ class ActionPattern implements Action:
     if o is not string: return true
     return regex_.match o
 
-class ActionDependentRequired implements Action:
+class DependentRequired extends Assertion:
   properties/Map
 
   constructor .properties/Map:
