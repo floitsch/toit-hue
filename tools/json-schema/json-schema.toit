@@ -252,12 +252,40 @@ class VocabularyApplicator implements Vocabulary:
       schema.add-applicator (PropertyNames subschema)
 
 
-// class VocabularyUnevaluated implements Vocabulary:
-//   static URL ::= "https://json-schema.org/draft/2020-12/meta/unevaluated"
-//   static KEYWORDS ::= [
-//     "unevaluatedItems",
-//     "unevaluatedProperties",
-//   ]
+class VocabularyUnevaluated implements Vocabulary:
+  static URI ::= "https://json-schema.org/draft/2020-12/meta/unevaluated"
+
+  static KEYWORDS ::= [
+    "unevaluatedItems",
+    "unevaluatedProperties",
+  ]
+
+  uri -> string:
+    return URI
+
+  keywords -> List:
+    return KEYWORDS
+
+  add-actions --schema/SchemaObject_ --context/BuildContext --json-pointer/JsonPointer -> none:
+    json := schema.json-value
+
+    json.get "unevaluatedItems" --if-present=: | unevaluated-items/any |
+      sub-pointer := json-pointer + "unevaluatedItems"
+      // Building the schema will automatically add its json-pointer to the store.
+      subschema := Schema.build_ unevaluated-items
+          --parent=schema
+          --context=context
+          --json-pointer=sub-pointer
+      schema.add-applicator (UnevaluatedItems subschema)
+
+    json.get "unevaluatedProperties" --if-present=: | unevaluated-properties/any |
+      sub-pointer := json-pointer + "unevaluatedProperties"
+      // Building the schema will automatically add its json-pointer to the store.
+      subschema := Schema.build_ unevaluated-properties
+          --parent=schema
+          --context=context
+          --json-pointer=sub-pointer
+      schema.add-applicator (UnevaluatedProperties subschema)
 
 class VocabularyValidation implements Vocabulary:
   static URI ::= "https://json-schema.org/draft/2020-12/vocab/validation"
@@ -370,6 +398,51 @@ class HttpResourceLoader implements ResourceLoader:
       if client: client.close
       network.close
 
+class Result_:
+  is-valid/bool := true
+
+  evaluated-properties/Set? := null
+  evaluated-items/Set? := null
+  all-items-evaluated/bool := false
+
+  mark-evaluated-property key/string:
+    if not evaluated-properties: evaluated-properties = Set
+    evaluated-properties.add key
+
+  mark-evaluated-item index/int:
+    if all-items-evaluated: return
+    if not evaluated-items: evaluated-items = Set
+    evaluated-items.add index
+
+  mark-all-items-evaluated:
+    all-items-evaluated = true
+    evaluated-items = null
+
+  merge other/Result_ -> Result_:
+    TODO(florian): this doesn't work: we can't just merge stuff all over the place. When we
+    enter/leave an object/array we must not propagate more.
+    For example { "o": { "b": 4}} should not have "b" as evaluated property of the outer map.
+    assert: is-valid and other.is-valid
+    result := Result_
+    if evaluated-properties or other.evaluated-properties:
+      result.evaluated-properties = Set
+      result.evaluated-properties.add-all evaluated-properties
+      result.evaluated-properties.add-all other.evaluated-properties
+    if all-items-evaluated or other.all-items-evaluated:
+      result.all-items-evaluated = true
+      result.evaluated-items = null
+    else if evaluated-items or other.evaluated-items:
+      result.evaluated-items = Set
+      result.evaluated-items.add-all evaluated-items
+      result.evaluated-items.add-all other.evaluated-items
+    return result
+
+  fail message/string:
+    evaluated-properties = null
+    evaluated-items = null
+    all-items-evaluated = false
+    is-valid = false
+
 build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
   store := Store
   context := BuildContext --store=store
@@ -410,7 +483,8 @@ class JsonSchema:
   constructor .schema_ .store_:
 
   validate o/any -> bool:
-    return schema_.validate_ o --store=store_ --dynamic-scope=[]
+    result := schema_.validate_ o --store=store_ --dynamic-scope=[]
+    return result.is-valid
 
 abstract class Schema:
   json-value/any
@@ -446,7 +520,7 @@ abstract class Schema:
     context.store.add schema-json-pointer-url.to-string result
     return result
 
-  abstract validate_ o/any --store/Store --dynamic-scope/List -> bool
+  abstract validate_ o/any --store/Store --dynamic-scope/List -> Result_
 
 
 class SchemaObject_ extends Schema:
@@ -464,16 +538,30 @@ class SchemaObject_ extends Schema:
   add-assertion assertion/Assertion:
     actions.add assertion
 
-  validate_ o/any --store/Store --dynamic-scope/List -> bool:
+  validate_ o/any --store/Store --dynamic-scope/List -> Result_:
     if not is-sorted_:
       actions.sort --in-place: | a/Action b/Action | a.order.compare-to b.order
       is-sorted_ = true
 
+    result := Result_
     with-updated-dynamic-scope_ dynamic-scope: | updated-scope/List |
       actions.do: | action/Action |
-        if not action.validate o --store=store --dynamic-scope=updated-scope: return false
+        action-result/Result_ := ?
+        if action is UnevaluatedApplicator:
+          unevaluated-action := action as UnevaluatedApplicator
+          action-result = unevaluated-action.validate o
+              --store=store
+              --dynamic-scope=updated-scope
+              --unevaluated-properties=result.evaluated-properties
+              --unevaluated-items=result.evaluated-items
+              --all-items-evaluated=result.all-items-evaluated
+        else:
+          action-result = action.validate o --store=store --dynamic-scope=updated-scope
+        if not action-result.is-valid:
+          return action-result
+        result = result.merge action-result
 
-    return true
+    return result
 
   with-updated-dynamic-scope_ dynamic-scope/List [block] -> none:
     if dynamic-scope.is-empty or dynamic-scope.last != schema-resource:
@@ -519,8 +607,11 @@ class SchemaBool_ extends Schema:
   constructor value/bool --schema-resource/SchemaResource_:
     super.from-sub_ value --schema-resource=schema-resource
 
-  validate_ o/any --store/Store --dynamic-scope/List -> bool:
-    return json-value
+  validate_ o/any --store/Store --dynamic-scope/List -> Result_:
+    result := Result_
+    if not json-value:
+      result.fail "Value is false."
+    return result
 
 class BuildContext:
   store/Store
@@ -562,16 +653,27 @@ abstract class Action:
   Typically, actions that are fast to execute should be executed first, so that their failure
     short-circuits the validation.
 
-  Applicators should never run after ORDER-LATE, as the $Properties and $Items applicators
+  Applicators should never run after ORDER-LATE, as the $UnevaluatedProperties and $UnevaluatedItems applicators
     are run at that level and need to know whether subschemas have evaluated properties/items.
   */
   abstract order -> int
 
-  abstract validate o/any --dynamic-scope/List --store/Store -> bool
+  abstract validate o/any --dynamic-scope/List --store/Store -> Result_
 
 abstract class Applicator extends Action:
   order -> int:
     return Action.ORDER-DEFAULT
+
+abstract class UnevaluatedApplicator extends Applicator:
+  order -> int:
+    return Action.ORDER-LATE
+
+  abstract validate o/any -> Result_
+      --dynamic-scope/List
+      --store/Store
+      --unevaluated-properties/Set?
+      --unevaluated-items/Set?
+      --all-items-evaluated/bool?
 
 abstract class Assertion extends Action:
   order -> int:
@@ -609,14 +711,15 @@ class Ref extends Applicator:
     // Otherwise we would have changed the dynamic reference to a static one.
     throw "Dynamic reference withouth a dynamic target: $target-uri"
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
     resolved/Schema? := is-dynamic
         ? find-dynamic-schema_ --dynamic-scope=dynamic-scope --store=store
         : resolved_
 
+    result := Result_
     if resolved == null:
-      // TODO(florian): what should this do?
-      return false
+      throw "Unresolved reference: $target-uri"
+
     return resolved.validate_ o --dynamic-scope=dynamic-scope --store=store
 
 class X-Of extends Applicator:
@@ -629,29 +732,44 @@ class X-Of extends Applicator:
 
   constructor --.kind .subschemas:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
     if kind == ALL-OF:
-      return subschemas.every: | subschema/Schema |
-        subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
-    else if kind == ANY-OF:
-      return subschemas.any: | subschema/Schema |
-        subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
-    else if kind == ONE-OF:
-      success-count := 0
+      result := Result_
       subschemas.do: | subschema/Schema |
-        if subschema.validate_ o --dynamic-scope=dynamic-scope --store=store:
-          success-count++
-      return success-count == 1
+        sub-result := subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+        if not sub-result.is-valid:
+          return sub-result
+        result = result.merge sub-result
+      return result
     else:
-      throw "unreachable"
+      success-count := 0
+      result := Result_
+      subschemas.do: | subschema/Schema |
+        subresult := subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+        if subresult.is-valid:
+          success-count++
+          result = result.merge subresult
+      if kind == ONE-OF:
+        if success-count != 1:
+          result.fail "Expected exactly one subschema to match."
+      else if kind == ANY-OF:
+        if success-count == 0:
+          result.fail "Expected at least one subschema to match."
+      else:
+        unreachable
+      return result
 
 class Not extends Applicator:
   subschema/Schema
 
   constructor .subschema/Schema:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    return not subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    subresult := subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+    if subresult.is-valid:
+      result.fail "Expected subschema to fail."
+    return result
 
 class IfThenElse extends Applicator:
   condition-subschema/Schema
@@ -660,27 +778,43 @@ class IfThenElse extends Applicator:
 
   constructor .condition-subschema/Schema .then-subschema/Schema? .else-subschema/Schema?:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    if condition-subschema.validate_ o --dynamic-scope=dynamic-scope --store=store:
-      if not then-subschema: return true
-      return then-subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    condition-result := condition-subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+    if condition-result.is-valid:
+      result = result.merge condition-result
+      if then-subschema:
+        then-result := then-subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+        if not then-result.is-valid:
+          return then-result
+        else:
+          return result.merge then-result
     else:
-      if not else-subschema: return true
-      return else-subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+      if else-subschema:
+        else-result := else-subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+        if not else-result.is-valid:
+          return else-result
+        else:
+          return result.merge else-result
+    return result
 
 class DependentSchemas extends Applicator:
   subschemas/Map
 
   constructor .subschemas/Map:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    if o is not Map: return true
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    if o is not Map: return result
     map := o as Map
     subschemas.do: | key/string subschema/Schema |
       map.get key --if-present=: | value/any |
-        if not subschema.validate_ o --dynamic-scope=dynamic-scope --store=store:
-          return false
-    return true
+        subresult := subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+        if not subresult.is-valid:
+          result.fail "Dependent schema '$key' failed."
+          return result
+        result = result.merge subresult
+    return result
 
 class Properties extends Applicator:
   properties/Map?
@@ -698,43 +832,54 @@ class Properties extends Applicator:
       cached-regexs_ = null
 
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    if o is not Map: return true
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    if o is not Map: return result
     map := o as Map
     map.do: | key/string value/any |
       is-additional := true
       if properties and properties.contains key:
         is-additional = false
-        if not properties[key].validate_ value --dynamic-scope=dynamic-scope --store=store:
-          return false
+        subresult := properties[key].validate_ value --dynamic-scope=dynamic-scope --store=store
+        if not subresult.is-valid:
+          result.fail "Property '$key' failed."
+          return result
+        result = result.merge subresult
       if patterns:
         patterns.do: | pattern/string schema/Schema |
           regex := cached-regexs_[pattern]
           if regex.match key:
             is-additional = false
-            if not schema.validate_ value --dynamic-scope=dynamic-scope --store=store:
-              return false
+            subresult := schema.validate_ value --dynamic-scope=dynamic-scope --store=store
+            if not subresult.is-valid:
+              result.fail "Pattern for '$key' failed."
+              return result
+            result = result.merge subresult
 
       if is-additional and additional:
-        if not additional.validate_ value --dynamic-scope=dynamic-scope --store=store:
-          return false
-    return true
-
-  order -> int:
-    return Action.ORDER-LATE
+        subresult := additional.validate_ value --dynamic-scope=dynamic-scope --store=store
+        if not subresult.is-valid:
+          result.fail "Additional for '$key' failed."
+          return result
+        result = result.merge subresult
+    return result
 
 class PropertyNames extends Applicator:
   subschema/Schema
 
   constructor .subschema/Schema:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    if o is not Map: return true
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    if o is not Map: return result
     map := o as Map
     map.do: | key/string _ |
-      if not subschema.validate_ key --dynamic-scope=dynamic-scope --store=store:
-        return false
-    return true
+      subresult := subschema.validate_ key --dynamic-scope=dynamic-scope --store=store
+      if not subresult.is-valid:
+        result.fail "Property name '$key' failed."
+        return result
+      result = result.merge subresult
+    return result
 
 class Contains extends Applicator:
   subschema/Schema
@@ -743,42 +888,48 @@ class Contains extends Applicator:
 
   constructor .subschema/Schema --.min-contains --.max-contains:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    if o is not List: return true
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    if o is not List: return result
     list := o as List
     success-count := 0
     list.do: | item/any |
-      if subschema.validate_ item --dynamic-scope=dynamic-scope --store=store:
+      subresult := subschema.validate_ item --dynamic-scope=dynamic-scope --store=store
+      if subresult.is-valid:
         success-count++
+        result = result.merge subresult
     if min-contains:
       if success-count < min-contains:
-        return false
+        result.fail "Expected at least $min-contains items to match."
+        return result
     else if success-count == 0:
-      return false
-
+      result.fail "Expected at least one item to match."
+      return result
     if max-contains and success-count > max-contains:
-      return false
-
-    return true
+      result.fail "Expected at most $max-contains items to match."
+      return result
+    return result
 
 class Type extends Assertion:
   types/List
 
   constructor .types/List:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
     types.do: | type-string |
-      if type-string == "null" and o == null: return true
-      if type-string == "boolean" and o is bool: return true
-      if type-string == "object" and o is Map: return true
-      if type-string == "array" and o is List: return true
-      if type-string == "number" and o is num: return true
-      if type-string == "string" and o is string: return true
+      if type-string == "null" and o == null: return result
+      if type-string == "boolean" and o is bool: return result
+      if type-string == "object" and o is Map: return result
+      if type-string == "array" and o is List: return result
+      if type-string == "number" and o is num: return result
+      if type-string == "string" and o is string: return result
       if type-string == "integer":
-        if o is int: return true
+        if o is int: return result
         // TODO(florian): This is not correct: to-int could throw.
-        if o is float and (o as float).to-int == o: return true
-    return false
+        if o is float and (o as float).to-int == o: return result
+    result.fail "Value type not one of $types"
+    return result
 
 structural-equals_ a/any b/any -> bool:
   if a is num and a == b: return true
@@ -812,18 +963,23 @@ class Enum extends Assertion:
 
   constructor .values/List:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
     values.do: | value |
-      if structural-equals_ o value: return true
-    return false
+      if structural-equals_ o value: return result
+    result.fail "Value not one of $values"
+    return result
 
 class Const extends Assertion:
   value/any
 
   constructor .value/any:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    return structural-equals_ o value
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    if not structural-equals_ o value:
+      result.fail "Value not equal to $value"
+    return result
 
 class NumComparison extends Assertion:
   static MULTIPLE-OF ::= 0
@@ -837,20 +993,30 @@ class NumComparison extends Assertion:
 
   constructor .n/num --.kind:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    if o is not num: return true
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    if o is not num: return result
     if kind == MULTIPLE-OF:
-      return o % n == 0.0
-    else if kind == MAXIMUM:
-      return o <= n
-    else if kind == EXCLUSIVE-MAXIMUM:
-      return o < n
-    else if kind == MINIMUM:
-      return o >= n
-    else if kind == EXCLUSIVE-MINIMUM:
-      return o > n
-    else:
-      throw "unreachable"
+      if o % n != 0.0:
+        result.fail "Value $o not a multiple of $n"
+      return result
+    if kind == MAXIMUM:
+      if o > n:
+        result.fail "Value $o greater than $n"
+      return result
+    if kind == EXCLUSIVE-MAXIMUM:
+      if o >= n:
+        result.fail "Value $o greater than or equal to $n"
+      return result
+    if kind == MINIMUM:
+      if o < n:
+        result.fail "Value $o less than $n"
+      return result
+    if kind == EXCLUSIVE-MINIMUM:
+      if o <= n:
+        result.fail "Value $o less than or equal to $n"
+      return result
+    throw "unreachable"
 
 class StringLength extends Assertion:
   min/int?
@@ -858,13 +1024,18 @@ class StringLength extends Assertion:
 
   constructor --.min --.max:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    if o is not string: return true
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    if o is not string: return result
     str := o as string
     rune-size := str.size --runes
-    if min and rune-size < min: return false
-    if max and rune-size > max: return false
-    return true
+    if min and rune-size < min:
+      result.fail "String length $rune-size less than $min"
+      return result
+    if max and rune-size > max:
+      result.fail "String length $rune-size greater than $max"
+      return result
+    return result
 
 class ArrayLength extends Assertion:
   min/int?
@@ -872,35 +1043,46 @@ class ArrayLength extends Assertion:
 
   constructor --.min --.max:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    if o is not List: return true
-    if min and o.size < min: return false
-    if max and o.size > max: return false
-    return true
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    if o is not List: return result
+    if min and o.size < min:
+      result.fail "Array length $o.size less than $min"
+      return result
+    if max and o.size > max:
+      result.fail "Array length $o.size greater than $max"
+      return result
+    return result
 
 class UniqueItems extends Assertion:
   constructor:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    if o is not List: return true
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    if o is not List: return result
     list := o as List
     // For simplicity do an O(n^2) algorithm.
     for i := 0; i < list.size; i++:
       for j := i + 1; j < list.size; j++:
-        if structural-equals_ list[i] list[j]: return false
-    return true
+        if structural-equals_ list[i] list[j]:
+          result.fail "Array contains duplicate items."
+          return result
+    return result
 
 class Required extends Assertion:
   properties/List
 
   constructor .properties/List:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    if o is not Map: return true
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    if o is not Map: return result
     map := o as Map
     properties.do: | property |
-      if not map.contains property: return false
-    return true
+      if not map.contains property:
+        result.fail "Required property '$property' missing."
+        return result
+    return result
 
 class ObjectSize extends Assertion:
   min/int?
@@ -908,12 +1090,17 @@ class ObjectSize extends Assertion:
 
   constructor --.min --.max:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    if o is not Map: return true
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    if o is not Map: return result
     map := o as Map
-    if min and map.size < min: return false
-    if max and map.size > max: return false
-    return true
+    if min and map.size < min:
+      result.fail "Object size $map.size less than $min"
+      return result
+    if max and map.size > max:
+      result.fail "Object size $map.size greater than $max"
+      return result
+    return result
 
 class Items extends Applicator:
   prefix-items/List?
@@ -921,17 +1108,24 @@ class Items extends Applicator:
 
   constructor --.prefix-items --.items:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    if o is not List: return true
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    if o is not List: return result
     list := o as List
     for i := 0; i < list.size; i++:
       if prefix-items and i < prefix-items.size:
-        if not prefix-items[i].validate_ list[i] --dynamic-scope=dynamic-scope --store=store:
-          return false
+        subresult := prefix-items[i].validate_ list[i] --dynamic-scope=dynamic-scope --store=store
+        if not subresult.is-valid:
+          result.fail "Prefix item $i failed."
+          return result
+        result = result.merge subresult
       else if items:
-        if not items.validate_ --dynamic-scope=dynamic-scope --store=store list[i]:
-          return false
-    return true
+        subresult := items.validate_ list[i] --dynamic-scope=dynamic-scope --store=store
+        if not subresult.is-valid:
+          result.fail "Item $i failed."
+          return result
+        result = result.merge subresult
+    return result
 
 class Pattern extends Assertion:
   pattern/string
@@ -940,20 +1134,70 @@ class Pattern extends Assertion:
   constructor .pattern:
     regex_ = regex.parse pattern
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    if o is not string: return true
-    return regex_.match o
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    if o is not string: return result
+    str := o as string
+    if not regex_.match str:
+      result.fail "String '$str' does not match pattern '$pattern'"
+    return result
 
 class DependentRequired extends Assertion:
   properties/Map
 
   constructor .properties/Map:
 
-  validate o/any --dynamic-scope/List --store/Store -> bool:
-    if o is not Map: return true
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    result := Result_
+    if o is not Map: return result
     map := o as Map
     properties.do: | key/string required/List |
       if map.contains key:
         required.do: | property |
-          if not map.contains property: return false
-    return true
+          if not map.contains property:
+            result.fail "Depending required property '$property' missing."
+            return result
+    return result
+
+class UnevaluatedProperties extends UnevaluatedApplicator:
+  subschema/Schema
+
+  constructor .subschema/Schema:
+
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    unreachable
+
+  validate o/any --dynamic-scope/List --store/Store --unevaluated-properties/List? --unevaluated-items/List? --all-items-evaluated/bool? -> Result_:
+    result := Result_
+    if o is not Map: return result
+    map := o as Map
+    map.do: | key/string _ |
+      if not unevaluated-properties or not unevaluated-properties.contains key:
+        subresult := subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+        if not subresult.is-valid:
+          result.fail "Unevaluated property '$key' failed."
+          return result
+        result = result.merge subresult
+    return result
+
+class UnevaluatedItems extends UnevaluatedApplicator:
+  subschema/Schema
+
+  constructor .subschema/Schema:
+
+  validate o/any --dynamic-scope/List --store/Store -> Result_:
+    unreachable
+
+  validate o/any --dynamic-scope/List --store/Store --unevaluated-properties/List? --unevaluated-items/List? --all-items-evaluated/bool? -> Result_:
+    result := Result_
+    if o is not List: return result
+    if all-items-evaluated: return result
+    list := o as List
+    list.do: | item/any |
+      if not unevaluated-items or not unevaluated-items.contains item:
+        subresult := subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+        if not subresult.is-valid:
+          result.fail "Unevaluated item '$item' failed."
+          return result
+        result = result.merge subresult
+    return result
