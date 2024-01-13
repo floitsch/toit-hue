@@ -444,7 +444,11 @@ build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
         if not store.get missing-resource-url-string:
           resource-json := resource-loader.load missing-resource-url-string
           // Building the schema will automatically add its json-pointer to the store.
-          schema := Schema.build_ resource-json --context=context --json-pointer=JsonPointer --parent=null
+          schema := Schema.build_ resource-json
+              --context=context
+              --json-pointer=JsonPointer
+              --parent=null
+              --base-uri=missing-resource-url
           // The downloaded resource might have an ID that is different than the URL.
           store.add missing-resource-url-string schema
           // Try again to find the target.
@@ -473,7 +477,12 @@ abstract class Schema:
 
   constructor.from-sub_ .json-value --.schema-resource:
 
-  static build_ o/any --parent/SchemaObject_? --context/BuildContext --json-pointer/JsonPointer -> Schema:
+  static build_ o/any -> Schema
+      --parent/SchemaObject_?
+      --context/BuildContext
+      --json-pointer/JsonPointer
+      --base-uri/UriReference? = null
+  :
     result/Schema := ?
     if o is bool:
       result = SchemaBool_ o --schema-resource=parent.schema-resource
@@ -483,7 +492,7 @@ abstract class Schema:
       if not new-id and parent:
         schema-object = SchemaObject_ o --schema-resource=parent.schema-resource
       else:
-        schema-resource := SchemaResource_ o --parent=parent
+        schema-resource := SchemaResource_ o --parent=parent --base-uri=base-uri
         // Also add the schema without the '#' fragment.
         context.store.add schema-resource.uri.to-string schema-resource
         // Reset the json-pointer.
@@ -566,11 +575,13 @@ class SchemaResource_ extends SchemaObject_:
   uri/UriReference
   vocabularies/Map
 
-  constructor o/Map --parent/SchemaObject_?:
+  constructor o/Map --parent/SchemaObject_? --base-uri/UriReference?:
     new-id := o.get "\$id"
     // This is a resource schema.
     // TODO(florian): get the "$schema".
-    if not new-id:
+    if not new-id and base-uri:
+      new-id = base-uri.to-string
+    else if not new-id:
       new-id = "urn:uuid:$(uuid.uuid5 "json-schema" "$Time.now.ns-since-epoch")"
     // Empty fragments are allowed (but not recommended).
     // Trim them.
