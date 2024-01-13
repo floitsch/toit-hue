@@ -975,6 +975,7 @@ class Contains extends Applicator:
     if o is not List: return result
     list := o as List
     success-count := 0
+    contained-indexes := []
     for i := 0; i < list.size; i++:
       item := list[i]
       subresult := subschema.validate_ item
@@ -982,6 +983,7 @@ class Contains extends Applicator:
           --store=store
           --json-pointer=json-pointer[i]
       if subresult.is-valid:
+        contained-indexes.add i
         success-count++
         result.merge subresult
     if min-contains:
@@ -994,6 +996,8 @@ class Contains extends Applicator:
     if max-contains and success-count > max-contains:
       result.fail "Expected at most $max-contains items to match."
       return result
+    annotation-value := contained-indexes == list.size ? true : contained-indexes
+    result.annotate json-pointer "contains" annotation-value
     return result
 
 class Type extends SimpleAssertion:
@@ -1208,6 +1212,11 @@ class Items extends Applicator:
           result.fail "Item $i failed."
           return result
         result.merge subresult
+    if prefix-items:
+      annotation-value := prefix-items.size < list.size ? prefix-items.size : true
+      result.annotate json-pointer "prefixItems" annotation-value
+    if items:
+      result.annotate json-pointer "items" true
     return result
 
 class Pattern extends SimpleStringAssertion:
@@ -1303,6 +1312,7 @@ class UnevaluatedItems extends AnnotationsApplicator:
     if o is not List: return result
     list := o as List
     first-unevaluated := 0
+    evaluated-with-contains := {}
     if annotations:
       list-annotations/List? := annotations.get json-pointer.to-string
       if list-annotations:
@@ -1310,18 +1320,31 @@ class UnevaluatedItems extends AnnotationsApplicator:
           if annotation.key == "items" or annotation.key == "unevaluatedItems":
             // Means that all items have been evaluated.
             return result
+          if annotation.key == "contains":
+            value := annotation.value
+            if value == true:
+              // Was applied to all items.
+              return result
+            assert: value is List
+            evaluated-with-contains.add-all (value as List)
           if annotation.key == "prefixItems":
             value := annotation.value
             if value == true:
-              // Was applied to all prefix items.
+              // Was applied to all items.
               return result
             assert: value is int
             prefix-count := value as int
             if prefix-count >= list.size:
-              // Was applied to all prefix items.
+              // Was applied to all items.
               return result
             first-unevaluated = prefix-count
+          else if annotation.key == "contains":
+
+    needs-annotation := false
     for i := first-unevaluated; i < list.size; i++:
+      if evaluated-with-contains.contains i:
+        continue
+      needs-annotation = true
       item := list[i]
       subresult := subschema.validate_ item
           --dynamic-scope=dynamic-scope
@@ -1331,4 +1354,6 @@ class UnevaluatedItems extends AnnotationsApplicator:
         result.fail "Unevaluated item at position '$i' failed."
         return result
       result.merge subresult
+    if needs-annotation:
+      result.annotate json-pointer "unevaluatedItems" true
     return result
