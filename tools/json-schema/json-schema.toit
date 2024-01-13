@@ -471,6 +471,35 @@ class JsonSchema:
     result := schema_.validate_ o --store=store_ --dynamic-scope=[] --json-pointer=JsonPointer
     return result.is-valid
 
+/**
+A schema resource identifies a group of schemas.
+
+It defines which vocabulary is used.
+It resets the json-pointer.
+It sets the URL for all contained schemas that are relative to the resource.
+*/
+class SchemaResource_:
+  uri/UriReference
+  vocabularies/Map
+
+  constructor id/string? --parent/SchemaObject_? --base-uri/UriReference?:
+    // This is a resource schema.
+    // TODO(florian): get the "$schema".
+    if not id and base-uri:
+      id = base-uri.to-string
+    else if not id:
+      id = "urn:uuid:$(uuid.uuid5 "json-schema" "$Time.now.ns-since-epoch")"
+    // Empty fragments are allowed (but not recommended).
+    // Trim them.
+    id = id.trim --right "#"
+    new-uri := UriReference.parse id
+    if not new-uri.is-absolute:
+      new-uri = new-uri.resolve --base=parent.schema-resource.uri
+    new-uri = new-uri.normalize
+    this.uri = new-uri
+    // Instantiate the schema object with a resource set to null and then update it to itself.
+    vocabularies = DEFAULT-VOCABULARIES
+
 abstract class Schema:
   json-value/any
   schema-resource/SchemaResource_? := ?
@@ -483,22 +512,20 @@ abstract class Schema:
       --json-pointer/JsonPointer
       --base-uri/UriReference? = null
   :
+    schema-resource/SchemaResource_ := ?
+    id := o is Map ? o.get "\$id" : null
+    if id or not parent:
+      schema-resource = SchemaResource_ id --parent=parent --base-uri=base-uri
+      // Reset the json-pointer.
+      json-pointer = JsonPointer
+    else:
+      schema-resource = parent.schema-resource
+
     result/Schema := ?
     if o is bool:
-      result = SchemaBool_ o --schema-resource=parent.schema-resource
+      result = SchemaBool_ o --schema-resource=schema-resource
     else:
-      schema-object/SchemaObject_ := ?
-      new-id := o.get "\$id"
-      if not new-id and parent:
-        schema-object = SchemaObject_ o --schema-resource=parent.schema-resource
-      else:
-        schema-resource := SchemaResource_ o --parent=parent --base-uri=base-uri
-        // Also add the schema without the '#' fragment.
-        context.store.add schema-resource.uri.to-string schema-resource
-        // Reset the json-pointer.
-        json-pointer = JsonPointer
-        schema-object = schema-resource
-
+      schema-object := SchemaObject_ o --schema-resource=schema-resource
       schema-object.schema-resource.vocabularies.do: | _ vocabulary/Vocabulary |
         vocabulary.add-actions --schema=schema-object --context=context --json-pointer=json-pointer
 
@@ -508,6 +535,9 @@ abstract class Schema:
     escaped-json-pointer = UriReference.normalize-fragment escaped-json-pointer
     schema-json-pointer-url := result.schema-resource.uri.with-fragment escaped-json-pointer
     context.store.add schema-json-pointer-url.to-string result
+    if json-pointer.to-fragment-string == "":
+      // Also add this schema without any fragment.
+      context.store.add result.schema-resource.uri.to-string result
     return result
 
   abstract validate_ o/any --store/Store --dynamic-scope/List --json-pointer/JsonPointer -> Result_
@@ -563,38 +593,6 @@ class SchemaObject_ extends Schema:
         dynamic-scope.remove-last
     else:
       block.call dynamic-scope
-
-/**
-A schema resource is a schema with an "$id" property.
-
-It defines which vocabulary is used.
-It resets the json-pointer.
-It sets the URL for all contained schemas that are relative to the resource.
-*/
-class SchemaResource_ extends SchemaObject_:
-  uri/UriReference
-  vocabularies/Map
-
-  constructor o/Map --parent/SchemaObject_? --base-uri/UriReference?:
-    new-id := o.get "\$id"
-    // This is a resource schema.
-    // TODO(florian): get the "$schema".
-    if not new-id and base-uri:
-      new-id = base-uri.to-string
-    else if not new-id:
-      new-id = "urn:uuid:$(uuid.uuid5 "json-schema" "$Time.now.ns-since-epoch")"
-    // Empty fragments are allowed (but not recommended).
-    // Trim them.
-    new-id = new-id.trim --right "#"
-    new-uri := UriReference.parse new-id
-    if not new-uri.is-absolute:
-      new-uri = new-uri.resolve --base=parent.schema-resource.uri
-    new-uri = new-uri.normalize
-    this.uri = new-uri
-    // Instantiate the schema object with a resource set to null and then update it to itself.
-    vocabularies = DEFAULT-VOCABULARIES
-    super o --schema-resource=null
-    this.schema-resource = this
 
 class SchemaBool_ extends Schema:
   constructor value/bool --schema-resource/SchemaResource_:
