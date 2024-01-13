@@ -14,6 +14,14 @@ class JsonPointer:
     new-segments.add escaped
     return JsonPointer.with-segments_ new-segments
 
+  operator [] segment/any:
+    if segment is string:
+      return this + segment
+    else if segment is int:
+      return this + "$segment"
+    else:
+      throw "Invalid segment type"
+
   static escape_ str/string -> string:
     str = str.replace --all "~" "~0"
     str = str.replace --all "/" "~1"

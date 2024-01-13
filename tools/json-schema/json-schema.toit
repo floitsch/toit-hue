@@ -74,7 +74,7 @@ class VocabularyCore implements Vocabulary:
 
     json.get "\$defs" --if-present=: | defs/Map |
       schema-defs := defs.map: | key/string value/any |
-        sub-pointer := json-pointer + "\$defs" + key
+        sub-pointer := json-pointer["\$defs"][key]
         // Building the schema will automatically add its json-pointer to the store.
         Schema.build_ value --parent=schema --context=context --json-pointer=sub-pointer
 
@@ -114,16 +114,14 @@ class VocabularyApplicator implements Vocabulary:
   map-schemas_ --list/List --parent/SchemaObject_? --context/BuildContext --json-pointer/JsonPointer -> List:
     result := List list.size: | i/int |
       sub-schema-json/any := list[i]
-      sub-pointer := json-pointer + "$i"
       // Building the schema will automatically add its json-pointer to the store.
-      Schema.build_ sub-schema-json --parent=parent --context=context --json-pointer=sub-pointer
+      Schema.build_ sub-schema-json --parent=parent --context=context --json-pointer=json-pointer[i]
     return result
 
   map-schemas_ --object/Map --parent/SchemaObject_? --context/BuildContext --json-pointer/JsonPointer -> Map:
     return object.map: | key/string sub-schema-json/any |
-      sub-pointer := json-pointer + key
       // Building the schema will automatically add its json-pointer to the store.
-      Schema.build_ sub-schema-json --parent=parent --context=context --json-pointer=sub-pointer
+      Schema.build_ sub-schema-json --parent=parent --context=context --json-pointer=json-pointer[key]
 
   add-actions --schema/SchemaObject_ --context/BuildContext --json-pointer/JsonPointer -> none:
     json := schema.json-value
@@ -134,7 +132,7 @@ class VocabularyApplicator implements Vocabulary:
             --list=entries
             --parent=schema
             --context=context
-            --json-pointer=json-pointer + keyword
+            --json-pointer=json-pointer[keyword]
         kind/int := ?
         if keyword == "allOf": kind = X-Of.ALL-OF
         else if keyword == "anyOf": kind = X-Of.ANY-OF
@@ -143,63 +141,55 @@ class VocabularyApplicator implements Vocabulary:
         schema.add-applicator (X-Of --kind=kind subschemas)
 
     json.get "not" --if-present=: | not-entry/any |
-      sub-pointer := json-pointer + "not"
       // Building the schema will automatically add its json-pointer to the store.
-      subschema := Schema.build_ not-entry --parent=schema --context=context --json-pointer=sub-pointer
+      subschema := Schema.build_ not-entry --parent=schema --context=context --json-pointer=json-pointer["not"]
       schema.add-applicator (Not subschema)
 
     condition-subschema/Schema? := json.get "if" --if-present=: | if-entry/any |
-      condition-sub-pointer := json-pointer + "if"
       // Building the schema will automatically add its json-pointer to the store.
-      Schema.build_ if-entry --parent=schema --context=context --json-pointer=condition-sub-pointer
+      Schema.build_ if-entry --parent=schema --context=context --json-pointer=json-pointer["if"]
 
     // We build the then subschema even if there is no 'if', in case
     // the subschema is referenced.
     then-subschema/Schema? := json.get "then" --if-present=: | then-entry/any |
-      then-sub-pointer := json-pointer + "then"
       // Building the schema will automatically add its json-pointer to the store.
-      Schema.build_ then-entry --parent=schema --context=context --json-pointer=then-sub-pointer
+      Schema.build_ then-entry --parent=schema --context=context --json-pointer=json-pointer["then"]
 
     // We build the 'else' subschema even if there is no 'if', in case
     // the subschema is referenced.
     else-subschema/Schema? := json.get "else" --if-present=: | else-entry/any |
-      else-sub-pointer := json-pointer + "else"
       // Building the schema will automatically add its json-pointer to the store.
-      Schema.build_ else-entry --parent=schema --context=context --json-pointer=else-sub-pointer
+      Schema.build_ else-entry --parent=schema --context=context --json-pointer=json-pointer["else"]
 
     if condition-subschema:
       schema.add-applicator (IfThenElse condition-subschema then-subschema else-subschema)
 
     json.get "dependentSchemas" --if-present=: | dependent-schemas/Map |
-      sub-pointer := json-pointer + "dependentSchemas"
       subschemas := map-schemas_
           --object=dependent-schemas
           --parent=schema
           --context=context
-          --json-pointer=sub-pointer
+          --json-pointer=json-pointer["dependentSchemas"]
       schema.add-applicator (DependentSchemas subschemas)
 
     prefix-items := json.get "prefixItems" --if-present=: | prefix-items/List |
-      sub-pointer := json-pointer + "prefixItems"
       subschemas := map-schemas_
           --list=prefix-items
           --parent=schema
           --context=context
-          --json-pointer=sub-pointer
+          --json-pointer=json-pointer["prefixItems"]
 
     items := json.get "items" --if-present=: | items/any |
-      sub-pointer := json-pointer + "items"
       // Building the schema will automatically add its json-pointer to the store.
       subschema := Schema.build_ items
           --parent=schema
           --context=context
-          --json-pointer=sub-pointer
+          --json-pointer=json-pointer["items"]
 
     if prefix-items or items:
       schema.add-applicator (Items --prefix-items=prefix-items --items=items)
 
     json.get "contains" --if-present=: | contains/any |
-      sub-pointer := json-pointer + "contains"
       supports-min-max := schema.schema-resource.vocabularies.contains VocabularyValidation.URI
       min-contains := supports-min-max ? int-value_ (json.get "minContains") : null
       max-contains := supports-min-max ? int-value_ (json.get "maxContains") : null
@@ -208,32 +198,29 @@ class VocabularyApplicator implements Vocabulary:
       subschema := Schema.build_ contains
           --parent=schema
           --context=context
-          --json-pointer=sub-pointer
+          --json-pointer=json-pointer["contains"]
       schema.add-applicator (Contains subschema --min-contains=min-contains --max-contains=max-contains)
 
     properties := json.get "properties" --if-present=: | properties/Map |
-      sub-pointer := json-pointer + "properties"
       subschemas := map-schemas_
           --object=properties
           --parent=schema
           --context=context
-          --json-pointer=sub-pointer
+          --json-pointer=json-pointer["properties"]
 
     additional-properties := json.get "additionalProperties" --if-present=: | additional-properties/any |
-      sub-pointer := json-pointer + "additionalProperties"
       // Building the schema will automatically add its json-pointer to the store.
       subschema := Schema.build_ additional-properties
           --parent=schema
           --context=context
-          --json-pointer=sub-pointer
+          --json-pointer=json-pointer["additionalProperties"]
 
     pattern-properties := json.get "patternProperties" --if-present=: | pattern-properties/Map |
-      sub-pointer := json-pointer + "patternProperties"
       subschemas := map-schemas_
           --object=pattern-properties
           --parent=schema
           --context=context
-          --json-pointer=sub-pointer
+          --json-pointer=json-pointer["patternProperties"]
 
     if properties or additional-properties or pattern-properties:
       applicator := Properties
@@ -243,12 +230,11 @@ class VocabularyApplicator implements Vocabulary:
       schema.add-applicator applicator
 
     json.get "propertyNames" --if-present=: | property-names/any |
-      sub-pointer := json-pointer + "propertyNames"
       // Building the schema will automatically add its json-pointer to the store.
       subschema := Schema.build_ property-names
           --parent=schema
           --context=context
-          --json-pointer=sub-pointer
+          --json-pointer=json-pointer["propertyNames"]
       schema.add-applicator (PropertyNames subschema)
 
 
@@ -270,21 +256,19 @@ class VocabularyUnevaluated implements Vocabulary:
     json := schema.json-value
 
     json.get "unevaluatedItems" --if-present=: | unevaluated-items/any |
-      sub-pointer := json-pointer + "unevaluatedItems"
       // Building the schema will automatically add its json-pointer to the store.
       subschema := Schema.build_ unevaluated-items
           --parent=schema
           --context=context
-          --json-pointer=sub-pointer
+          --json-pointer=json-pointer["unevaluatedItems"]
       schema.add-applicator (UnevaluatedItems subschema)
 
     json.get "unevaluatedProperties" --if-present=: | unevaluated-properties/any |
-      sub-pointer := json-pointer + "unevaluatedProperties"
       // Building the schema will automatically add its json-pointer to the store.
       subschema := Schema.build_ unevaluated-properties
           --parent=schema
           --context=context
-          --json-pointer=sub-pointer
+          --json-pointer=json-pointer["unevaluatedProperties"]
       schema.add-applicator (UnevaluatedProperties subschema)
 
 class VocabularyValidation implements Vocabulary:
@@ -374,6 +358,7 @@ DEFAULT-VOCABULARIES ::= {
   VocabularyCore.URI: VocabularyCore,
   VocabularyApplicator.URI: VocabularyApplicator,
   VocabularyValidation.URI: VocabularyValidation,
+  VocabularyUnevaluated.URI: VocabularyUnevaluated,
 }
 
 interface ResourceLoader:
@@ -400,48 +385,44 @@ class HttpResourceLoader implements ResourceLoader:
 
 class Result_:
   is-valid/bool := true
+  annotations/Map? := null
 
-  evaluated-properties/Set? := null
-  evaluated-items/Set? := null
-  all-items-evaluated/bool := false
-
-  mark-evaluated-property key/string:
-    if not evaluated-properties: evaluated-properties = Set
-    evaluated-properties.add key
-
-  mark-evaluated-item index/int:
-    if all-items-evaluated: return
-    if not evaluated-items: evaluated-items = Set
-    evaluated-items.add index
-
-  mark-all-items-evaluated:
-    all-items-evaluated = true
-    evaluated-items = null
-
-  merge other/Result_ -> Result_:
-    TODO(florian): this doesn't work: we can't just merge stuff all over the place. When we
-    enter/leave an object/array we must not propagate more.
-    For example { "o": { "b": 4}} should not have "b" as evaluated property of the outer map.
+  /**
+  Merges the $other result into this one.
+  Reuses the $other result's fields if possible. This means that the $other result
+    can not be used after this method is called.
+  */
+  merge other/Result_ -> none:
     assert: is-valid and other.is-valid
     result := Result_
-    if evaluated-properties or other.evaluated-properties:
-      result.evaluated-properties = Set
-      result.evaluated-properties.add-all evaluated-properties
-      result.evaluated-properties.add-all other.evaluated-properties
-    if all-items-evaluated or other.all-items-evaluated:
-      result.all-items-evaluated = true
-      result.evaluated-items = null
-    else if evaluated-items or other.evaluated-items:
-      result.evaluated-items = Set
-      result.evaluated-items.add-all evaluated-items
-      result.evaluated-items.add-all other.evaluated-items
-    return result
+    if not other.annotations:
+      return
+    if not annotations:
+      annotations = other.annotations
+      return
+    other.annotations.do: | key/string other-entries/List |
+      this-entry := annotations.get key
+      if not this-entry:
+        annotations[key] = other-entries
+      else:
+        this-entry.add-all other-entries
 
   fail message/string:
-    evaluated-properties = null
-    evaluated-items = null
-    all-items-evaluated = false
+    annotations = null
     is-valid = false
+
+  annotate json-pointer/JsonPointer key/string value/any:
+    if not annotations:
+      annotations = {:}
+    annotation-key := json-pointer.to-string
+    entries := annotations.get annotation-key --init=:[]
+    entries.add (Annotation key value)
+
+class Annotation:
+  key/string
+  value/any
+
+  constructor .key .value:
 
 build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
   store := Store
@@ -483,7 +464,7 @@ class JsonSchema:
   constructor .schema_ .store_:
 
   validate o/any -> bool:
-    result := schema_.validate_ o --store=store_ --dynamic-scope=[]
+    result := schema_.validate_ o --store=store_ --dynamic-scope=[] --json-pointer=JsonPointer
     return result.is-valid
 
 abstract class Schema:
@@ -520,8 +501,7 @@ abstract class Schema:
     context.store.add schema-json-pointer-url.to-string result
     return result
 
-  abstract validate_ o/any --store/Store --dynamic-scope/List -> Result_
-
+  abstract validate_ o/any --store/Store --dynamic-scope/List --json-pointer/JsonPointer -> Result_
 
 class SchemaObject_ extends Schema:
   is-resolved/bool := false
@@ -538,7 +518,7 @@ class SchemaObject_ extends Schema:
   add-assertion assertion/Assertion:
     actions.add assertion
 
-  validate_ o/any --store/Store --dynamic-scope/List -> Result_:
+  validate_ o/any --store/Store --dynamic-scope/List --json-pointer/JsonPointer -> Result_:
     if not is-sorted_:
       actions.sort --in-place: | a/Action b/Action | a.order.compare-to b.order
       is-sorted_ = true
@@ -547,19 +527,21 @@ class SchemaObject_ extends Schema:
     with-updated-dynamic-scope_ dynamic-scope: | updated-scope/List |
       actions.do: | action/Action |
         action-result/Result_ := ?
-        if action is UnevaluatedApplicator:
-          unevaluated-action := action as UnevaluatedApplicator
-          action-result = unevaluated-action.validate o
+        if action is AnnotationsApplicator:
+          annotations-action := action as AnnotationsApplicator
+          action-result = annotations-action.validate o
               --store=store
               --dynamic-scope=updated-scope
-              --unevaluated-properties=result.evaluated-properties
-              --unevaluated-items=result.evaluated-items
-              --all-items-evaluated=result.all-items-evaluated
+              --annotations=result.annotations
+              --json-pointer=json-pointer
         else:
-          action-result = action.validate o --store=store --dynamic-scope=updated-scope
+          action-result = action.validate o
+              --store=store
+              --dynamic-scope=updated-scope
+              --json-pointer=json-pointer
         if not action-result.is-valid:
           return action-result
-        result = result.merge action-result
+        result.merge action-result
 
     return result
 
@@ -607,7 +589,7 @@ class SchemaBool_ extends Schema:
   constructor value/bool --schema-resource/SchemaResource_:
     super.from-sub_ value --schema-resource=schema-resource
 
-  validate_ o/any --store/Store --dynamic-scope/List -> Result_:
+  validate_ o/any --store/Store --dynamic-scope/List --json-pointer/JsonPointer -> Result_:
     result := Result_
     if not json-value:
       result.fail "Value is false."
@@ -658,26 +640,63 @@ abstract class Action:
   */
   abstract order -> int
 
-  abstract validate o/any --dynamic-scope/List --store/Store -> Result_
+  abstract validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_
 
 abstract class Applicator extends Action:
   order -> int:
     return Action.ORDER-DEFAULT
 
-abstract class UnevaluatedApplicator extends Applicator:
+abstract class AnnotationsApplicator extends Applicator:
   order -> int:
     return Action.ORDER-LATE
 
   abstract validate o/any -> Result_
       --dynamic-scope/List
       --store/Store
-      --unevaluated-properties/Set?
-      --unevaluated-items/Set?
-      --all-items-evaluated/bool?
+      --json-pointer/JsonPointer
+      --annotations/Map?
 
 abstract class Assertion extends Action:
   order -> int:
     return Action.ORDER-EARLY
+
+abstract class SimpleAssertion extends Assertion:
+  abstract validate o/any -> Result_
+
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
+    return validate o
+
+abstract class SimpleStringAssertion extends Assertion:
+  abstract validate str/string -> Result_
+
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
+    if o is not string:
+      return Result_
+    return validate o as string
+
+abstract class SimpleNumAssertion extends Assertion:
+  abstract validate n/num -> Result_
+
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
+    if o is not num:
+      return Result_
+    return validate o as num
+
+abstract class SimpleObjectAssertion extends Assertion:
+  abstract validate o/Map -> Result_
+
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
+    if o is not Map:
+      return Result_
+    return validate o as Map
+
+abstract class SimpleListAssertion extends Assertion:
+  abstract validate o/List -> Result_
+
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
+    if o is not List:
+      return Result_
+    return validate o as List
 
 class Ref extends Applicator:
   target-uri/UriReference
@@ -711,7 +730,7 @@ class Ref extends Applicator:
     // Otherwise we would have changed the dynamic reference to a static one.
     throw "Dynamic reference withouth a dynamic target: $target-uri"
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
     resolved/Schema? := is-dynamic
         ? find-dynamic-schema_ --dynamic-scope=dynamic-scope --store=store
         : resolved_
@@ -720,7 +739,7 @@ class Ref extends Applicator:
     if resolved == null:
       throw "Unresolved reference: $target-uri"
 
-    return resolved.validate_ o --dynamic-scope=dynamic-scope --store=store
+    return resolved.validate_ o --dynamic-scope=dynamic-scope --store=store --json-pointer=json-pointer
 
 class X-Of extends Applicator:
   static ALL-OF ::= 0
@@ -732,23 +751,29 @@ class X-Of extends Applicator:
 
   constructor --.kind .subschemas:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
     if kind == ALL-OF:
       result := Result_
       subschemas.do: | subschema/Schema |
-        sub-result := subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+        sub-result := subschema.validate_ o
+            --dynamic-scope=dynamic-scope
+            --store=store
+            --json-pointer=json-pointer
         if not sub-result.is-valid:
           return sub-result
-        result = result.merge sub-result
+        result.merge sub-result
       return result
     else:
       success-count := 0
       result := Result_
       subschemas.do: | subschema/Schema |
-        subresult := subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+        subresult := subschema.validate_ o
+            --dynamic-scope=dynamic-scope
+            --store=store
+            --json-pointer=json-pointer
         if subresult.is-valid:
           success-count++
-          result = result.merge subresult
+          result.merge subresult
       if kind == ONE-OF:
         if success-count != 1:
           result.fail "Expected exactly one subschema to match."
@@ -764,9 +789,12 @@ class Not extends Applicator:
 
   constructor .subschema/Schema:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
     result := Result_
-    subresult := subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+    subresult := subschema.validate_ o
+        --dynamic-scope=dynamic-scope
+        --store=store
+        --json-pointer=json-pointer
     if subresult.is-valid:
       result.fail "Expected subschema to fail."
     return result
@@ -778,24 +806,35 @@ class IfThenElse extends Applicator:
 
   constructor .condition-subschema/Schema .then-subschema/Schema? .else-subschema/Schema?:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
     result := Result_
-    condition-result := condition-subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+    condition-result := condition-subschema.validate_ o
+        --dynamic-scope=dynamic-scope
+        --store=store
+        --json-pointer=json-pointer
     if condition-result.is-valid:
-      result = result.merge condition-result
+      result.merge condition-result
       if then-subschema:
-        then-result := then-subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+        then-result := then-subschema.validate_ o
+            --dynamic-scope=dynamic-scope
+            --store=store
+            --json-pointer=json-pointer
         if not then-result.is-valid:
           return then-result
         else:
-          return result.merge then-result
+          result.merge then-result
+          return result
     else:
       if else-subschema:
-        else-result := else-subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+        else-result := else-subschema.validate_ o
+            --dynamic-scope=dynamic-scope
+            --store=store
+            --json-pointer=json-pointer
         if not else-result.is-valid:
           return else-result
         else:
-          return result.merge else-result
+          result.merge else-result
+          return result
     return result
 
 class DependentSchemas extends Applicator:
@@ -803,17 +842,20 @@ class DependentSchemas extends Applicator:
 
   constructor .subschemas/Map:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
     result := Result_
     if o is not Map: return result
     map := o as Map
     subschemas.do: | key/string subschema/Schema |
       map.get key --if-present=: | value/any |
-        subresult := subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+        subresult := subschema.validate_ o
+            --dynamic-scope=dynamic-scope
+            --store=store
+            --json-pointer=json-pointer
         if not subresult.is-valid:
           result.fail "Dependent schema '$key' failed."
           return result
-        result = result.merge subresult
+        result.merge subresult
     return result
 
 class Properties extends Applicator:
@@ -832,36 +874,61 @@ class Properties extends Applicator:
       cached-regexs_ = null
 
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
     result := Result_
     if o is not Map: return result
     map := o as Map
+    evaluated-properties := {}
+    evaluated-matched-properties := {}
+    evaluated-additional-properties := {}
+
     map.do: | key/string value/any |
       is-additional := true
       if properties and properties.contains key:
+        evaluated-properties.add key
         is-additional = false
-        subresult := properties[key].validate_ value --dynamic-scope=dynamic-scope --store=store
+        key-pointer := json-pointer[key]
+        subresult := properties[key].validate_ value
+            --dynamic-scope=dynamic-scope
+            --store=store
+            --json-pointer=key-pointer
         if not subresult.is-valid:
           result.fail "Property '$key' failed."
           return result
-        result = result.merge subresult
+        result.merge subresult
+
       if patterns:
         patterns.do: | pattern/string schema/Schema |
           regex := cached-regexs_[pattern]
           if regex.match key:
+            evaluated-matched-properties.add key
             is-additional = false
-            subresult := schema.validate_ value --dynamic-scope=dynamic-scope --store=store
+            subresult := schema.validate_ value
+                --dynamic-scope=dynamic-scope
+                --store=store
+                --json-pointer=json-pointer[key]
             if not subresult.is-valid:
               result.fail "Pattern for '$key' failed."
               return result
-            result = result.merge subresult
+            result.merge subresult
 
       if is-additional and additional:
-        subresult := additional.validate_ value --dynamic-scope=dynamic-scope --store=store
+        evaluated-additional-properties.add key
+        subresult := additional.validate_ value
+            --dynamic-scope=dynamic-scope
+            --store=store
+            --json-pointer=json-pointer[key]
         if not subresult.is-valid:
           result.fail "Additional for '$key' failed."
           return result
-        result = result.merge subresult
+        result.merge subresult
+
+    if not evaluated-properties.is-empty:
+      result.annotate json-pointer "properties" evaluated-properties
+    if not evaluated-matched-properties.is-empty:
+      result.annotate json-pointer "patternProperties" evaluated-matched-properties
+    if not evaluated-additional-properties.is-empty:
+      result.annotate json-pointer "additionalProperties" evaluated-additional-properties
     return result
 
 class PropertyNames extends Applicator:
@@ -869,16 +936,20 @@ class PropertyNames extends Applicator:
 
   constructor .subschema/Schema:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
     result := Result_
     if o is not Map: return result
     map := o as Map
     map.do: | key/string _ |
-      subresult := subschema.validate_ key --dynamic-scope=dynamic-scope --store=store
+      subresult := subschema.validate_ key
+          --dynamic-scope=dynamic-scope
+          --store=store
+          // I don't think there is a way to point to the key of a property with a json pointer.
+          --json-pointer=json-pointer
       if not subresult.is-valid:
         result.fail "Property name '$key' failed."
         return result
-      result = result.merge subresult
+      result.merge subresult
     return result
 
 class Contains extends Applicator:
@@ -888,16 +959,20 @@ class Contains extends Applicator:
 
   constructor .subschema/Schema --.min-contains --.max-contains:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
     result := Result_
     if o is not List: return result
     list := o as List
     success-count := 0
-    list.do: | item/any |
-      subresult := subschema.validate_ item --dynamic-scope=dynamic-scope --store=store
+    for i := 0; i < list.size; i++:
+      item := list[i]
+      subresult := subschema.validate_ item
+          --dynamic-scope=dynamic-scope
+          --store=store
+          --json-pointer=json-pointer[i]
       if subresult.is-valid:
         success-count++
-        result = result.merge subresult
+        result.merge subresult
     if min-contains:
       if success-count < min-contains:
         result.fail "Expected at least $min-contains items to match."
@@ -910,12 +985,12 @@ class Contains extends Applicator:
       return result
     return result
 
-class Type extends Assertion:
+class Type extends SimpleAssertion:
   types/List
 
   constructor .types/List:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/any -> Result_:
     result := Result_
     types.do: | type-string |
       if type-string == "null" and o == null: return result
@@ -958,30 +1033,30 @@ structural-equals_ a/any b/any -> bool:
 
   return false
 
-class Enum extends Assertion:
+class Enum extends SimpleAssertion:
   values/List
 
   constructor .values/List:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/any -> Result_:
     result := Result_
     values.do: | value |
       if structural-equals_ o value: return result
     result.fail "Value not one of $values"
     return result
 
-class Const extends Assertion:
+class Const extends SimpleAssertion:
   value/any
 
   constructor .value/any:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/any -> Result_:
     result := Result_
     if not structural-equals_ o value:
       result.fail "Value not equal to $value"
     return result
 
-class NumComparison extends Assertion:
+class NumComparison extends SimpleNumAssertion:
   static MULTIPLE-OF ::= 0
   static MAXIMUM ::= 1
   static EXCLUSIVE-MAXIMUM ::= 2
@@ -993,9 +1068,8 @@ class NumComparison extends Assertion:
 
   constructor .n/num --.kind:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/num -> Result_:
     result := Result_
-    if o is not num: return result
     if kind == MULTIPLE-OF:
       if o % n != 0.0:
         result.fail "Value $o not a multiple of $n"
@@ -1018,16 +1092,14 @@ class NumComparison extends Assertion:
       return result
     throw "unreachable"
 
-class StringLength extends Assertion:
+class StringLength extends SimpleStringAssertion:
   min/int?
   max/int?
 
   constructor --.min --.max:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate str/string -> Result_:
     result := Result_
-    if o is not string: return result
-    str := o as string
     rune-size := str.size --runes
     if min and rune-size < min:
       result.fail "String length $rune-size less than $min"
@@ -1037,15 +1109,14 @@ class StringLength extends Assertion:
       return result
     return result
 
-class ArrayLength extends Assertion:
+class ArrayLength extends SimpleListAssertion:
   min/int?
   max/int?
 
   constructor --.min --.max:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/List -> Result_:
     result := Result_
-    if o is not List: return result
     if min and o.size < min:
       result.fail "Array length $o.size less than $min"
       return result
@@ -1054,13 +1125,11 @@ class ArrayLength extends Assertion:
       return result
     return result
 
-class UniqueItems extends Assertion:
+class UniqueItems extends SimpleListAssertion:
   constructor:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate list/List -> Result_:
     result := Result_
-    if o is not List: return result
-    list := o as List
     // For simplicity do an O(n^2) algorithm.
     for i := 0; i < list.size; i++:
       for j := i + 1; j < list.size; j++:
@@ -1069,31 +1138,27 @@ class UniqueItems extends Assertion:
           return result
     return result
 
-class Required extends Assertion:
+class Required extends SimpleObjectAssertion:
   properties/List
 
   constructor .properties/List:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate map/Map -> Result_:
     result := Result_
-    if o is not Map: return result
-    map := o as Map
     properties.do: | property |
       if not map.contains property:
         result.fail "Required property '$property' missing."
         return result
     return result
 
-class ObjectSize extends Assertion:
+class ObjectSize extends SimpleObjectAssertion:
   min/int?
   max/int?
 
   constructor --.min --.max:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate map/Map -> Result_:
     result := Result_
-    if o is not Map: return result
-    map := o as Map
     if min and map.size < min:
       result.fail "Object size $map.size less than $min"
       return result
@@ -1108,49 +1173,52 @@ class Items extends Applicator:
 
   constructor --.prefix-items --.items:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
     result := Result_
     if o is not List: return result
     list := o as List
     for i := 0; i < list.size; i++:
       if prefix-items and i < prefix-items.size:
-        subresult := prefix-items[i].validate_ list[i] --dynamic-scope=dynamic-scope --store=store
+        prefix-schema/Schema := prefix-items[i]
+        subresult := prefix-schema.validate_ list[i]
+            --dynamic-scope=dynamic-scope
+            --store=store
+            --json-pointer=json-pointer[i]
         if not subresult.is-valid:
           result.fail "Prefix item $i failed."
           return result
-        result = result.merge subresult
+        result.merge subresult
       else if items:
-        subresult := items.validate_ list[i] --dynamic-scope=dynamic-scope --store=store
+        subresult := items.validate_ list[i]
+            --dynamic-scope=dynamic-scope
+            --store=store
+            --json-pointer=json-pointer[i]
         if not subresult.is-valid:
           result.fail "Item $i failed."
           return result
-        result = result.merge subresult
+        result.merge subresult
     return result
 
-class Pattern extends Assertion:
+class Pattern extends SimpleStringAssertion:
   pattern/string
   regex_/regex.Regex
 
   constructor .pattern:
     regex_ = regex.parse pattern
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate str/string -> Result_:
     result := Result_
-    if o is not string: return result
-    str := o as string
     if not regex_.match str:
       result.fail "String '$str' does not match pattern '$pattern'"
     return result
 
-class DependentRequired extends Assertion:
+class DependentRequired extends SimpleObjectAssertion:
   properties/Map
 
   constructor .properties/Map:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate map/Map -> Result_:
     result := Result_
-    if o is not Map: return result
-    map := o as Map
     properties.do: | key/string required/List |
       if map.contains key:
         required.do: | property |
@@ -1159,45 +1227,97 @@ class DependentRequired extends Assertion:
             return result
     return result
 
-class UnevaluatedProperties extends UnevaluatedApplicator:
+class UnevaluatedProperties extends AnnotationsApplicator:
+  static EVALUATED-ANNOTATION-KEYS_ ::= [
+    "properties",
+    "patternProperties",
+    "additionalProperties",
+    "unevaluatedProperties",
+  ]
   subschema/Schema
 
   constructor .subschema/Schema:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
     unreachable
 
-  validate o/any --dynamic-scope/List --store/Store --unevaluated-properties/List? --unevaluated-items/List? --all-items-evaluated/bool? -> Result_:
+  validate o/any -> Result_
+      --dynamic-scope/List
+      --store/Store
+      --json-pointer/JsonPointer
+      --annotations/Map?
+  :
     result := Result_
     if o is not Map: return result
+
+    evaluated := {}
+    if annotations:
+      object-annotations := annotations.get json-pointer.to-string
+      if object-annotations:
+        object-annotations.do: | annotation/Annotation |
+          if EVALUATED-ANNOTATION-KEYS_.contains annotation.key:
+            evaluated.add-all annotation.value
+
+    new-evaluated := {}
     map := o as Map
-    map.do: | key/string _ |
-      if not unevaluated-properties or not unevaluated-properties.contains key:
-        subresult := subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
+    map.do: | key/string value/any |
+      if not evaluated.contains key:
+        new-evaluated.add key
+        subresult := subschema.validate_ value
+            --dynamic-scope=dynamic-scope
+            --store=store
+            --json-pointer=json-pointer[key]
         if not subresult.is-valid:
           result.fail "Unevaluated property '$key' failed."
           return result
-        result = result.merge subresult
+        result.merge subresult
+    result.annotate json-pointer "unevaluatedProperties" new-evaluated
     return result
 
-class UnevaluatedItems extends UnevaluatedApplicator:
+class UnevaluatedItems extends AnnotationsApplicator:
   subschema/Schema
 
   constructor .subschema/Schema:
 
-  validate o/any --dynamic-scope/List --store/Store -> Result_:
+  validate o/any --dynamic-scope/List --store/Store --json-pointer/JsonPointer -> Result_:
     unreachable
 
-  validate o/any --dynamic-scope/List --store/Store --unevaluated-properties/List? --unevaluated-items/List? --all-items-evaluated/bool? -> Result_:
+  validate o/any -> Result_
+      --dynamic-scope/List
+      --store/Store
+      --annotations/Map?
+      --json-pointer/JsonPointer
+  :
     result := Result_
     if o is not List: return result
-    if all-items-evaluated: return result
     list := o as List
-    list.do: | item/any |
-      if not unevaluated-items or not unevaluated-items.contains item:
-        subresult := subschema.validate_ o --dynamic-scope=dynamic-scope --store=store
-        if not subresult.is-valid:
-          result.fail "Unevaluated item '$item' failed."
-          return result
-        result = result.merge subresult
+    first-unevaluated := 0
+    if annotations:
+      list-annotations/List? := annotations.get json-pointer.to-string
+      if list-annotations:
+        list-annotations.do: | annotation/Annotation |
+          if annotation.key == "items" or annotation.key == "unevaluatedItems":
+            // Means that all items have been evaluated.
+            return result
+          if annotation.key == "prefixItems":
+            value := annotation.value
+            if value == true:
+              // Was applied to all prefix items.
+              return result
+            assert: value is int
+            prefix-count := value as int
+            if prefix-count >= list.size:
+              // Was applied to all prefix items.
+              return result
+            first-unevaluated = prefix-count
+    for i := first-unevaluated; i < list.size; i++:
+      item := list[i]
+      subresult := subschema.validate_ item
+          --dynamic-scope=dynamic-scope
+          --store=store
+          --json-pointer=json-pointer[i]
+      if not subresult.is-valid:
+        result.fail "Unevaluated item at position '$i' failed."
+        return result
+      result.merge subresult
     return result
