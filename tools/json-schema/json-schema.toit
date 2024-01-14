@@ -12,11 +12,25 @@ import .uri
 import .json-pointer
 import .regex as regex
 
-class Dialect:
-  vocabularies_/Map
+// Cached entries for dialects, so we don't need to download the Schema.
+DIALECTS ::= {
+  "https://json-schema.org/draft/2020-12/schema": {
+    "https://json-schema.org/draft/2020-12/vocab/core": true,
+    "https://json-schema.org/draft/2020-12/vocab/applicator": true,
+    "https://json-schema.org/draft/2020-12/vocab/unevaluated": true,
+    "https://json-schema.org/draft/2020-12/vocab/validation": true,
+    "https://json-schema.org/draft/2020-12/vocab/meta-data": true,
+    "https://json-schema.org/draft/2020-12/vocab/format-annotation": true,
+    "https://json-schema.org/draft/2020-12/vocab/content": true,
+  }
+}
 
-  constructor --vocabularies/Map:
-    vocabularies_ = vocabularies
+KNOWN-VOCABULARIES ::= {
+  VocabularyCore.URI: VocabularyCore,
+  VocabularyApplicator.URI: VocabularyApplicator,
+  VocabularyValidation.URI: VocabularyValidation,
+  VocabularyUnevaluated.URI: VocabularyUnevaluated,
+}
 
 interface Vocabulary:
   uri -> string
@@ -239,8 +253,7 @@ class VocabularyApplicator implements Vocabulary:
 
 
 class VocabularyUnevaluated implements Vocabulary:
-  static URI ::= "https://json-schema.org/draft/2020-12/meta/unevaluated"
-
+  static URI ::= "https://json-schema.org/draft/2020-12/vocab/unevaluated"
   static KEYWORDS ::= [
     "unevaluatedItems",
     "unevaluatedProperties",
@@ -426,7 +439,7 @@ class Annotation:
 
 build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
   store := Store
-  context := BuildContext --store=store
+  context := BuildContext --store=store --resource-loader=resource-loader
   root-schema := Schema.build_ o --context=context --json-pointer=JsonPointer --parent=null
 
   // Resolve all references.
@@ -435,6 +448,10 @@ build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
     context.refs = []
     pending.do: | ref/Ref |
       target-uri := ref.target-uri
+      target-uri-no-fragment := target-uri.with-fragment null
+      context.resource-uri-id-mapping.get target-uri-no-fragment --if-present=: | replacement/UriReference |
+        // The target URI is actually an ID that was defined in a resource.
+        target-uri = replacement.with-fragment target-uri.fragment
       target := target-uri.to-string
       resolved := store.get target
 
@@ -482,9 +499,9 @@ class SchemaResource_:
   uri/UriReference
   vocabularies/Map
 
-  constructor id/string? --parent/SchemaObject_? --base-uri/UriReference?:
-    // This is a resource schema.
-    // TODO(florian): get the "$schema".
+  constructor o/any --parent/SchemaObject_? --base-uri/UriReference? --build-context/BuildContext:
+    id/string? := o is Map ? o.get "\$id" : null
+
     if not id and base-uri:
       id = base-uri.to-string
     else if not id:
@@ -497,8 +514,33 @@ class SchemaResource_:
       new-uri = new-uri.resolve --base=parent.schema-resource.uri
     new-uri = new-uri.normalize
     this.uri = new-uri
-    // Instantiate the schema object with a resource set to null and then update it to itself.
-    vocabularies = DEFAULT-VOCABULARIES
+
+    if id and base-uri and new-uri != base-uri:
+      // The resource was loaded with the base-uri, but it declares a different ID.
+      // Remember the mapping.
+      build-context.resource-uri-id-mapping[base-uri] = new-uri
+
+    // Unless this is a schema with a "$schema" property that overrides the
+    // dialect, these are the vocabularies we want to use:
+    //  Inherit from parent if there is one, otherwise use the default ones.
+    vocabularies = parent ? parent.schema-resource.vocabularies : DEFAULT-VOCABULARIES
+    if o is not Map:
+
+    if o is Map and o.contains "\$schema":
+      meta-uri := o.get "\$schema"
+      dialect := DIALECTS.get meta-uri
+      if not dialect:
+        meta-schema := build-context.resource-loader.load meta-uri
+        if meta-schema is Map:
+          dialect = meta-schema.get "\$vocabulary"
+      vocabularies = {:}
+      dialect.do: | vocabulary-uri/string required/bool |
+        // TODO(florian): take required into account.
+        vocabulary := KNOWN-VOCABULARIES.get vocabulary-uri
+        if not vocabulary and required:
+          // print "WE SHOULD REJECT HERE"
+        if vocabulary:
+          vocabularies[vocabulary-uri] = vocabulary
 
 abstract class Schema:
   json-value/any
@@ -513,9 +555,8 @@ abstract class Schema:
       --base-uri/UriReference? = null
   :
     schema-resource/SchemaResource_ := ?
-    id := o is Map ? o.get "\$id" : null
-    if id or not parent:
-      schema-resource = SchemaResource_ id --parent=parent --base-uri=base-uri
+    if not parent or (o is Map and o.get "\$id"):
+      schema-resource = SchemaResource_ o --parent=parent --base-uri=base-uri --build-context=context
       // Reset the json-pointer.
       json-pointer = JsonPointer
     else:
@@ -607,8 +648,14 @@ class SchemaBool_ extends Schema:
 class BuildContext:
   store/Store
   refs/List := []  // Of ActionRef.
+  resource-loader/ResourceLoader
+  /**
+  Resource-schemas can be loaded through a URL that isn't their actual ID.
+  For example, this can happen when a loaded schema defines its own "$id" property.
+  */
+  resource-uri-id-mapping := {:}  // From UriReference to UriReference.
 
-  constructor --.store:
+  constructor --.store --.resource-loader:
 
 class Store:
   entries_/Map ::= {:}

@@ -68,6 +68,23 @@ class UriReference:
 
     return UriReference --scheme=scheme --authority=authority --path=str --query=query --fragment=fragment
 
+  operator == other/any:
+    if other is not UriReference: return false
+    return scheme == other.scheme and
+        authority == other.authority and
+        path == other.path and
+        query == other.query and
+        fragment == other.fragment
+
+  hash-code -> int:
+    result := 0
+    if scheme: result = 31 * result + scheme.hash-code
+    if authority: result = 29 * result + authority.hash-code
+    result = 37 * result + path.hash-code
+    if query: result = 47 * result + query.hash-code
+    if fragment: result = 97 * result + fragment.hash-code
+    return result
+
   to-string -> string:
     result := ""
     if scheme != null: result = "$scheme:"
