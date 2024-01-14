@@ -6,13 +6,13 @@ class JsonPointer:
   constructor:
     segments = [""]
 
-  constructor.with-segments_ .segments:
+  constructor.with-segments .segments:
 
   operator + segment/string:
     escaped := escape_ segment
     new-segments := segments.copy
     new-segments.add escaped
-    return JsonPointer.with-segments_ new-segments
+    return JsonPointer.with-segments new-segments
 
   operator [] segment/any:
     if segment is string:
