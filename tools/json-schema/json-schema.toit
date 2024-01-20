@@ -35,7 +35,7 @@ KNOWN-VOCABULARIES ::= {
 interface Vocabulary:
   uri -> string
   keywords -> List
-  add-actions --schema/SchemaObject_ --context/BuildContext --json-pointer/JsonPointer -> bool
+  add-actions --schema/Schema --context/BuildContext --json-pointer/JsonPointer -> bool
 
 class VocabularyCore implements Vocabulary:
   static URI ::= "https://json-schema.org/draft/2020-12/vocab/core"
@@ -62,7 +62,7 @@ class VocabularyCore implements Vocabulary:
     reference := (UriReference.parse ref).normalize
     return reference.resolve --base=schema-resource.uri
 
-  add-actions --schema/SchemaObject_ --context/BuildContext --json-pointer/JsonPointer -> none:
+  add-actions --schema/Schema --context/BuildContext --json-pointer/JsonPointer -> none:
     json := schema.json-value
     json.get "\$anchor" --if-present=: | anchor-id/string |
       normalized-fragment := UriReference.normalize-fragment anchor-id
@@ -125,19 +125,19 @@ class VocabularyApplicator implements Vocabulary:
   keywords -> List:
     return KEYWORDS
 
-  map-schemas_ --list/List --parent/SchemaObject_? --context/BuildContext --json-pointer/JsonPointer -> List:
+  map-schemas_ --list/List --parent/Schema? --context/BuildContext --json-pointer/JsonPointer -> List:
     result := List list.size: | i/int |
       sub-schema-json/any := list[i]
       // Building the schema will automatically add its json-pointer to the store.
       Schema.build_ sub-schema-json --parent=parent --context=context --json-pointer=json-pointer[i]
     return result
 
-  map-schemas_ --object/Map --parent/SchemaObject_? --context/BuildContext --json-pointer/JsonPointer -> Map:
+  map-schemas_ --object/Map --parent/Schema? --context/BuildContext --json-pointer/JsonPointer -> Map:
     return object.map: | key/string sub-schema-json/any |
       // Building the schema will automatically add its json-pointer to the store.
       Schema.build_ sub-schema-json --parent=parent --context=context --json-pointer=json-pointer[key]
 
-  add-actions --schema/SchemaObject_ --context/BuildContext --json-pointer/JsonPointer -> none:
+  add-actions --schema/Schema --context/BuildContext --json-pointer/JsonPointer -> none:
     json := schema.json-value
 
     ["allOf", "anyOf", "oneOf"].do: | keyword/string |
@@ -265,7 +265,7 @@ class VocabularyUnevaluated implements Vocabulary:
   keywords -> List:
     return KEYWORDS
 
-  add-actions --schema/SchemaObject_ --context/BuildContext --json-pointer/JsonPointer -> none:
+  add-actions --schema/Schema --context/BuildContext --json-pointer/JsonPointer -> none:
     json := schema.json-value
 
     json.get "unevaluatedItems" --if-present=: | unevaluated-items/any |
@@ -316,7 +316,7 @@ class VocabularyValidation implements Vocabulary:
   keywords -> List:
     return KEYWORDS
 
-  add-actions --schema/SchemaObject_ --context/BuildContext --json-pointer/JsonPointer -> none:
+  add-actions --schema/Schema --context/BuildContext --json-pointer/JsonPointer -> none:
     json := schema.json-value
 
     json.get "type" --if-present=: | type/any |
@@ -512,7 +512,7 @@ class SchemaResource_:
   uri/UriReference
   vocabularies/Map  // The dialect of this schema resource.
 
-  constructor o/any --parent/SchemaObject_? --base-uri/UriReference? --build-context/BuildContext:
+  constructor o/any --parent/Schema? --base-uri/UriReference? --build-context/BuildContext:
     id/string? := o is Map ? o.get "\$id" : null
 
     if not id and base-uri:
@@ -556,7 +556,7 @@ class SchemaResource_:
           vocabularies[vocabulary-uri] = vocabulary
 
 /**
-An instantiated schema is a schema that has been resolved and has a location in the schema tree.
+An instantiated schema is a schema that has been resolved and has a dynamic location in the schema tree.
 */
 abstract class InstantiatedSchema:
   parent/InstantiatedSchema?
@@ -573,12 +573,6 @@ abstract class InstantiatedSchema:
 
   operator [] segment1/string segment2/string sub-schema/Schema -> InstantiatedSchema:
     return InstantiatedSchema this [segment1, segment2] sub-schema
-
-  // validate o/any --store/Store --instance-pointer/JsonPointer -> Result_:
-  //   return schema.validate_ o
-  //       --store=store
-  //       --location=this
-  //       --instance-pointer=instance-pointer
 
   do-schema-resources --reversed [block]:
     if not reversed: throw "INVALID_ARGUMENT"
@@ -599,11 +593,11 @@ abstract class InstantiatedSchema:
   abstract validate o/any --store/Store --instance-pointer/JsonPointer -> Result_
 
 class InstantiatedSchemaObject extends InstantiatedSchema:
-  constructor parent/InstantiatedSchema? segments/List schema/SchemaObject_:
+  constructor parent/InstantiatedSchema? segments/List schema/Schema:
     super.from-sub_ parent segments schema
 
-  schema_ -> SchemaObject_:
-    return schema as SchemaObject_
+  schema_ -> Schema:
+    return schema as Schema
 
   validate o/any --store/Store --instance-pointer/JsonPointer -> Result_:
     result := Result_
@@ -628,7 +622,7 @@ class InstantiatedSchemaObject extends InstantiatedSchema:
     return result
 
 class InstantiatedSchemaBool extends InstantiatedSchema:
-  constructor parent/InstantiatedSchema? segments/List schema/SchemaBool_:
+  constructor parent/InstantiatedSchema? segments/List schema/Schema:
     super.from-sub_ parent segments schema
 
   validate o/any --store/Store --instance-pointer/JsonPointer -> Result_:
@@ -638,14 +632,24 @@ class InstantiatedSchemaBool extends InstantiatedSchema:
     return result
 
 
-abstract class Schema:
+class Schema:
   json-value/any
   schema-resource/SchemaResource_? := ?
+  is-resolved/bool := false
+  is-sorted_/bool := false
 
-  constructor.from-sub_ .json-value --.schema-resource:
+  actions/List ::= []
+
+  add-applicator applicator/Applicator:
+    actions.add applicator
+
+  add-assertion assertion/Assertion:
+    actions.add assertion
+
+  constructor.private_ .json-value --.schema-resource:
 
   static build_ o/any -> Schema
-      --parent/SchemaObject_?
+      --parent/Schema?
       --context/BuildContext
       --json-pointer/JsonPointer
       --base-uri/UriReference? = null
@@ -658,15 +662,10 @@ abstract class Schema:
     else:
       schema-resource = parent.schema-resource
 
-    result/Schema := ?
-    if o is bool:
-      result = SchemaBool_ o --schema-resource=schema-resource
-    else:
-      schema-object := SchemaObject_ o --schema-resource=schema-resource
-      schema-object.schema-resource.vocabularies.do: | _ vocabulary/Vocabulary |
-        vocabulary.add-actions --schema=schema-object --context=context --json-pointer=json-pointer
-
-      result = schema-object
+    result := Schema.private_ o --schema-resource=schema-resource
+    if o is Map:
+      result.schema-resource.vocabularies.do: | _ vocabulary/Vocabulary |
+        vocabulary.add-actions --schema=result --context=context --json-pointer=json-pointer
 
     escaped-json-pointer := json-pointer.to-fragment-string
     escaped-json-pointer = UriReference.normalize-fragment escaped-json-pointer
@@ -677,36 +676,14 @@ abstract class Schema:
       context.store.add result.schema-resource.uri.to-string result
     return result
 
-  abstract instantiate --parent/InstantiatedSchema? --segments/List -> InstantiatedSchemaObject
-
-class SchemaObject_ extends Schema:
-  is-resolved/bool := false
-  is-sorted_/bool := false
-
-  constructor o/Map --schema-resource/SchemaResource_?:
-    super.from-sub_ o --schema-resource=schema-resource
-
-  actions/List ::= []
-
-  add-applicator applicator/Applicator:
-    actions.add applicator
-
-  add-assertion assertion/Assertion:
-    actions.add assertion
-
-  instantiate --parent/InstantiatedSchema? --segments/List -> InstantiatedSchemaObject:
-    if not is-sorted_:
-      actions.sort --in-place: | a/Action b/Action | a.order.compare-to b.order
-      is-sorted_ = true
-
-    return InstantiatedSchemaObject parent segments this
-
-class SchemaBool_ extends Schema:
-  constructor value/bool --schema-resource/SchemaResource_:
-    super.from-sub_ value --schema-resource=schema-resource
-
-  instantiate --parent/InstantiatedSchema? --segments/List -> InstantiatedSchemaBool:
-    return InstantiatedSchemaBool parent segments this
+  instantiate --parent/InstantiatedSchema? --segments/List -> InstantiatedSchema:
+    if json-value is bool:
+      return InstantiatedSchemaBool parent segments this
+    else:
+      if not is-sorted_:
+        actions.sort --in-place: | a/Action b/Action | a.order.compare-to b.order
+        is-sorted_ = true
+      return InstantiatedSchemaObject parent segments this
 
 class BuildContext:
   store/Store
