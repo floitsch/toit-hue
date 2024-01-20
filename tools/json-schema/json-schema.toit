@@ -428,7 +428,7 @@ class Result_:
       instance-pointer/JsonPointer
       keyword/string
       value/any
-      --location/ValidationLocation
+      --location/InstantiatedSchema
   :
     if not annotations:
       annotations = {:}
@@ -444,7 +444,7 @@ class Result_:
 class Annotation:
   keyword/string
   instance-pointer/JsonPointer
-  location/ValidationLocation
+  location/InstantiatedSchema
   value/any
 
   constructor --.keyword --.instance-pointer --.location .value:
@@ -497,7 +497,7 @@ class JsonSchema:
   constructor .schema_ .store_:
 
   validate o/any -> bool:
-    location := ValidationLocation null [""] schema_
+    location := InstantiatedSchema null [""] schema_
     result := location.validate o --store=store_ --instance-pointer=JsonPointer
     return result.is-valid
 
@@ -555,24 +555,30 @@ class SchemaResource_:
         if vocabulary:
           vocabularies[vocabulary-uri] = vocabulary
 
-class ValidationLocation:
-  parent/ValidationLocation?
+/**
+An instantiated schema is a schema that has been resolved and has a location in the schema tree.
+*/
+abstract class InstantiatedSchema:
+  parent/InstantiatedSchema?
   segments/List
   schema/Schema
 
-  constructor .parent .segments .schema:
+  constructor parent/InstantiatedSchema? segments/List schema/Schema:
+    return schema.instantiate --parent=parent --segments=segments
 
-  operator [] segment/string sub-schema/Schema -> ValidationLocation:
-    return ValidationLocation this [segment] sub-schema
+  constructor.from-sub_ .parent .segments .schema:
 
-  operator [] segment1/string segment2/string sub-schema/Schema -> ValidationLocation:
-    return ValidationLocation this [segment1, segment2] sub-schema
+  operator [] segment/string sub-schema/Schema -> InstantiatedSchema:
+    return InstantiatedSchema this [segment] sub-schema
 
-  validate o/any --store/Store --instance-pointer/JsonPointer -> Result_:
-    return schema.validate_ o
-        --store=store
-        --location=this
-        --instance-pointer=instance-pointer
+  operator [] segment1/string segment2/string sub-schema/Schema -> InstantiatedSchema:
+    return InstantiatedSchema this [segment1, segment2] sub-schema
+
+  // validate o/any --store/Store --instance-pointer/JsonPointer -> Result_:
+  //   return schema.validate_ o
+  //       --store=store
+  //       --location=this
+  //       --instance-pointer=instance-pointer
 
   do-schema-resources --reversed [block]:
     if not reversed: throw "INVALID_ARGUMENT"
@@ -589,6 +595,48 @@ class ValidationLocation:
       current = current.parent
 
     resources.do --reversed block
+
+  abstract validate o/any --store/Store --instance-pointer/JsonPointer -> Result_
+
+class InstantiatedSchemaObject extends InstantiatedSchema:
+  constructor parent/InstantiatedSchema? segments/List schema/SchemaObject_:
+    super.from-sub_ parent segments schema
+
+  schema_ -> SchemaObject_:
+    return schema as SchemaObject_
+
+  validate o/any --store/Store --instance-pointer/JsonPointer -> Result_:
+    result := Result_
+    schema_.actions.do: | action/Action |
+      action-result/Result_ := ?
+      if action is AnnotationsApplicator:
+        annotations-action := action as AnnotationsApplicator
+        action-result = annotations-action.validate o
+            --store=store
+            --location=this
+            --annotations=result.annotations
+            --instance-pointer=instance-pointer
+      else:
+        action-result = action.validate o
+            --store=store
+            --location=this
+            --instance-pointer=instance-pointer
+      if not action-result.is-valid:
+        return action-result
+      result.merge action-result
+
+    return result
+
+class InstantiatedSchemaBool extends InstantiatedSchema:
+  constructor parent/InstantiatedSchema? segments/List schema/SchemaBool_:
+    super.from-sub_ parent segments schema
+
+  validate o/any --store/Store --instance-pointer/JsonPointer -> Result_:
+    result := Result_
+    if not schema.json-value:
+      result.fail "Value is false."
+    return result
+
 
 abstract class Schema:
   json-value/any
@@ -629,7 +677,7 @@ abstract class Schema:
       context.store.add result.schema-resource.uri.to-string result
     return result
 
-  abstract validate_ o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_
+  abstract instantiate --parent/InstantiatedSchema? --segments/List -> InstantiatedSchemaObject
 
 class SchemaObject_ extends Schema:
   is-resolved/bool := false
@@ -646,42 +694,19 @@ class SchemaObject_ extends Schema:
   add-assertion assertion/Assertion:
     actions.add assertion
 
-  validate_ o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  instantiate --parent/InstantiatedSchema? --segments/List -> InstantiatedSchemaObject:
     if not is-sorted_:
       actions.sort --in-place: | a/Action b/Action | a.order.compare-to b.order
       is-sorted_ = true
 
-    result := Result_
-    actions.do: | action/Action |
-      action-result/Result_ := ?
-      if action is AnnotationsApplicator:
-        annotations-action := action as AnnotationsApplicator
-        action-result = annotations-action.validate o
-            --store=store
-            --location=location
-            --annotations=result.annotations
-            --instance-pointer=instance-pointer
-      else:
-        action-result = action.validate o
-            --store=store
-            --location=location
-            --instance-pointer=instance-pointer
-      if not action-result.is-valid:
-        return action-result
-      result.merge action-result
-
-    return result
-
+    return InstantiatedSchemaObject parent segments this
 
 class SchemaBool_ extends Schema:
   constructor value/bool --schema-resource/SchemaResource_:
     super.from-sub_ value --schema-resource=schema-resource
 
-  validate_ o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
-    result := Result_
-    if not json-value:
-      result.fail "Value is false."
-    return result
+  instantiate --parent/InstantiatedSchema? --segments/List -> InstantiatedSchemaBool:
+    return InstantiatedSchemaBool parent segments this
 
 class BuildContext:
   store/Store
@@ -734,7 +759,7 @@ abstract class Action:
   */
   abstract order -> int
 
-  abstract validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_
+  abstract validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_
 
 abstract class Applicator extends Action:
   order -> int:
@@ -746,7 +771,7 @@ abstract class AnnotationsApplicator extends Applicator:
 
   abstract validate o/any -> Result_
       --store/Store
-      --location/ValidationLocation
+      --location/InstantiatedSchema
       --instance-pointer/JsonPointer
       --annotations/Map?
 
@@ -757,13 +782,13 @@ abstract class Assertion extends Action:
 abstract class SimpleAssertion extends Assertion:
   abstract validate o/any -> Result_
 
-  validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     return validate o
 
 abstract class SimpleStringAssertion extends Assertion:
   abstract validate str/string -> Result_
 
-  validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     if o is not string:
       return Result_
     return validate o as string
@@ -771,7 +796,7 @@ abstract class SimpleStringAssertion extends Assertion:
 abstract class SimpleNumAssertion extends Assertion:
   abstract validate n/num -> Result_
 
-  validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     if o is not num:
       return Result_
     return validate o as num
@@ -779,7 +804,7 @@ abstract class SimpleNumAssertion extends Assertion:
 abstract class SimpleObjectAssertion extends Assertion:
   abstract validate o/Map -> Result_
 
-  validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     if o is not Map:
       return Result_
     return validate o as Map
@@ -787,7 +812,7 @@ abstract class SimpleObjectAssertion extends Assertion:
 abstract class SimpleListAssertion extends Assertion:
   abstract validate o/List -> Result_
 
-  validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     if o is not List:
       return Result_
     return validate o as List
@@ -809,7 +834,7 @@ class Ref extends Applicator:
       is-dynamic = false
     resolved_ = schema
 
-  find-dynamic-schema_ --location/ValidationLocation --store/Store -> Schema:
+  find-dynamic-schema_ --location/InstantiatedSchema --store/Store -> Schema:
     location.do-schema-resources --reversed: | resource/SchemaResource_ |
       dynamic-target-uri := resource.uri.with-fragment dynamic-fragment
       dynamic-target := dynamic-target-uri.to-string
@@ -824,7 +849,7 @@ class Ref extends Applicator:
     // Otherwise we would have changed the dynamic reference to a static one.
     throw "Dynamic reference withouth a dynamic target: $target-uri"
 
-  validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     resolved/Schema? := is-dynamic
         ? find-dynamic-schema_ --location=location --store=store
         : resolved_
@@ -844,7 +869,7 @@ class X-Of extends Applicator:
 
   constructor --.kind .subschemas:
 
-  validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     if kind == ALL-OF:
       result := Result_
       for i := 0; i < subschemas.size; i++:
@@ -883,7 +908,7 @@ class Not extends Applicator:
 
   constructor .subschema/Schema:
 
-  validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     result := Result_
     subresult := location["not", subschema].validate o
         --store=store
@@ -899,7 +924,7 @@ class IfThenElse extends Applicator:
 
   constructor .condition-subschema/Schema .then-subschema/Schema? .else-subschema/Schema?:
 
-  validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     result := Result_
     condition-result := location["if", condition-subschema].validate o
         --store=store
@@ -932,7 +957,7 @@ class DependentSchemas extends Applicator:
 
   constructor .subschemas/Map:
 
-  validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     result := Result_
     if o is not Map: return result
     map := o as Map
@@ -965,7 +990,7 @@ class Properties extends Applicator:
 
   validate o/any -> Result_
       --store/Store
-      --location/ValidationLocation
+      --location/InstantiatedSchema
       --instance-pointer/JsonPointer
   :
     result := Result_
@@ -1025,7 +1050,7 @@ class PropertyNames extends Applicator:
 
   constructor .subschema/Schema:
 
-  validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     result := Result_
     if o is not Map: return result
     map := o as Map
@@ -1048,7 +1073,7 @@ class Contains extends Applicator:
 
   constructor .subschema/Schema --.min-contains --.max-contains:
 
-  validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     result := Result_
     if o is not List: return result
     list := o as List
@@ -1266,11 +1291,11 @@ class Items extends Applicator:
 
   constructor --.prefix-items --.items:
 
-  validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     result := Result_
     if o is not List: return result
     list := o as List
-    items-location/ValidationLocation? := items ? location["items", items] : null
+    items-location/InstantiatedSchema? := items ? location["items", items] : null
     for i := 0; i < list.size; i++:
       if prefix-items and i < prefix-items.size:
         prefix-schema/Schema := prefix-items[i]
@@ -1335,12 +1360,12 @@ class UnevaluatedProperties extends AnnotationsApplicator:
 
   constructor .subschema/Schema:
 
-  validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     unreachable
 
   validate o/any -> Result_
       --store/Store
-      --location/ValidationLocation
+      --location/InstantiatedSchema
       --instance-pointer/JsonPointer
       --annotations/Map?
   :
@@ -1376,12 +1401,12 @@ class UnevaluatedItems extends AnnotationsApplicator:
 
   constructor .subschema/Schema:
 
-  validate o/any --store/Store --location/ValidationLocation --instance-pointer/JsonPointer -> Result_:
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     unreachable
 
   validate o/any -> Result_
       --store/Store
-      --location/ValidationLocation
+      --location/InstantiatedSchema
       --instance-pointer/JsonPointer
       --annotations/Map?
   :
