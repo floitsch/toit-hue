@@ -30,6 +30,9 @@ KNOWN-VOCABULARIES ::= {
   VocabularyApplicator.URI: VocabularyApplicator,
   VocabularyValidation.URI: VocabularyValidation,
   VocabularyUnevaluated.URI: VocabularyUnevaluated,
+  VocabularyMetaData.URI: VocabularyMetaData,
+  VocabularyFormatAnnotation.URI: VocabularyFormatAnnotation,
+  VocabularyContent.URI: VocabularyContent,
 }
 
 interface Vocabulary:
@@ -367,11 +370,81 @@ class VocabularyValidation implements Vocabulary:
     json.get "dependentRequired" --if-present=: | dependent-required/Map |
       schema.add-assertion (DependentRequired dependent-required)
 
+class VocabularyFormatAnnotation implements Vocabulary:
+  static URI ::= "https://json-schema.org/draft/2020-12/vocab/format-annotation"
+
+  static KEYWORDS ::= [
+    "format",
+  ]
+
+  uri -> string:
+    return URI
+
+  keywords -> List:
+    return KEYWORDS
+
+  add-actions --schema/Schema --context/BuildContext --json-pointer/JsonPointer -> none:
+    json := schema.json-value
+
+    json.get "format" --if-present=: | format/string |
+      schema.add-assertion (Format format)
+
+abstract class VocabularyAnnotationBase implements Vocabulary:
+  abstract uri -> string
+  abstract keywords -> List
+
+  add-actions --schema/Schema --context/BuildContext --json-pointer/JsonPointer -> none:
+    json := schema.json-value
+
+    keywords.do: | keyword/string |
+      // We assume that the values have the correct type.
+      // The meta-schema can be used to validate the schema, so we don't need to do this
+      // here.
+      json.get keyword --if-present=: | value |
+        schema.add-assertion (AnnotationAction keyword value)
+
+class VocabularyMetaData extends VocabularyAnnotationBase:
+  static URI ::= "https://json-schema.org/draft/2020-12/vocab/meta-data"
+
+  static KEYWORDS ::= [
+    "title",
+    "description",
+    "default",
+    "deprecated",
+    "readOnly",
+    "writeOnly",
+    "examples",
+  ]
+
+  uri -> string:
+    return URI
+
+  keywords -> List:
+    return KEYWORDS
+
+class VocabularyContent extends VocabularyAnnotationBase:
+  static URI ::= "https://json-schema.org/draft/2020-12/vocab/content"
+
+  static KEYWORDS ::= [
+    "contentSchema",
+    "contentMediaType",
+    "contentEncoding",
+  ]
+
+  uri -> string:
+    return URI
+
+  keywords -> List:
+    return KEYWORDS
+
 DEFAULT-VOCABULARIES ::= {
   VocabularyCore.URI: VocabularyCore,
   VocabularyApplicator.URI: VocabularyApplicator,
   VocabularyValidation.URI: VocabularyValidation,
   VocabularyUnevaluated.URI: VocabularyUnevaluated,
+  VocabularyMetaData.URI: VocabularyMetaData,
+  VocabularyFormatAnnotation.URI: VocabularyFormatAnnotation,
+  VocabularyContent.URI: VocabularyContent,
 }
 
 interface ResourceLoader:
@@ -548,10 +621,9 @@ class SchemaResource_:
           dialect = meta-schema.get "\$vocabulary"
       vocabularies = {:}
       dialect.do: | vocabulary-uri/string required/bool |
-        // TODO(florian): take required into account.
         vocabulary := KNOWN-VOCABULARIES.get vocabulary-uri
         if not vocabulary and required:
-          // print "WE SHOULD REJECT HERE"
+          throw "Unknown vocabulary: $vocabulary-uri"
         if vocabulary:
           vocabularies[vocabulary-uri] = vocabulary
 
@@ -1435,4 +1507,26 @@ class UnevaluatedItems extends AnnotationsApplicator:
       result.merge subresult
     if needs-annotation:
       result.annotate instance-pointer "unevaluatedItems" true --location=location
+    return result
+
+class AnnotationAction extends Assertion:
+  keyword/string
+  value/any
+
+  constructor .keyword .value:
+
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
+    result_ := Result_
+    result_.annotate instance-pointer keyword value --location=location
+    return result_
+
+class Format extends Assertion:
+  format/string
+
+  constructor .format/string:
+
+  validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
+    result := Result_
+    result.annotate instance-pointer "format" format --location=location
+    // TODO(florian): Implement validation and give a way for users to add their own formats.
     return result
