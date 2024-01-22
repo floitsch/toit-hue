@@ -401,7 +401,7 @@ abstract class VocabularyAnnotationBase implements Vocabulary:
       // The meta-schema can be used to validate the schema, so we don't need to do this
       // here.
       json.get keyword --if-present=: | value |
-        schema.add-assertion (AnnotationAction keyword value)
+        schema.add-assertion (Annotation keyword value)
 
 class VocabularyMetaData extends VocabularyAnnotationBase:
   static URI ::= "https://json-schema.org/draft/2020-12/vocab/meta-data"
@@ -507,20 +507,25 @@ class Result_:
       annotations = {:}
     annotation-key := instance-pointer.to-string
     entries := annotations.get annotation-key --init=:[]
-    annotation := Annotation
+    annotation := Detail.annotation
         --keyword=keyword
         --instance-pointer=instance-pointer
         --location=location
         value
     entries.add annotation
 
-class Annotation:
+class Detail:
+  is-error/bool
   keyword/string
   instance-pointer/JsonPointer
   location/InstantiatedSchema
   value/any
 
-  constructor --.keyword --.instance-pointer --.location .value:
+  constructor.annotation --.keyword --.instance-pointer --.location .value:
+    is-error = false
+
+  constructor.error --.keyword --.instance-pointer --.location .value:
+    is-error = true
 
 build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
   store := Store
@@ -1425,7 +1430,8 @@ class UnevaluatedProperties extends AnnotationsApplicator:
     if annotations:
       object-annotations := annotations.get instance-pointer.to-string
       if object-annotations:
-        object-annotations.do: | annotation/Annotation |
+        object-annotations.do: | annotation/Detail |
+          if annotation.is-error: continue.do
           if EVALUATED-ANNOTATION-KEYS_.contains annotation.keyword:
             evaluated.add-all annotation.value
 
@@ -1467,7 +1473,8 @@ class UnevaluatedItems extends AnnotationsApplicator:
     if annotations:
       list-annotations/List? := annotations.get instance-pointer.to-string
       if list-annotations:
-        list-annotations.do: | annotation/Annotation |
+        list-annotations.do: | annotation/Detail |
+          if annotation.is-error: continue.do
           if annotation.keyword == "items" or annotation.keyword == "unevaluatedItems":
             // Means that all items have been evaluated.
             return result
@@ -1509,7 +1516,7 @@ class UnevaluatedItems extends AnnotationsApplicator:
       result.annotate instance-pointer "unevaluatedItems" true --location=location
     return result
 
-class AnnotationAction extends Assertion:
+class Annotation extends Assertion:
   keyword/string
   value/any
 
