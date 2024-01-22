@@ -575,7 +575,7 @@ class JsonSchema:
   constructor .schema_ .store_:
 
   validate o/any -> bool:
-    location := InstantiatedSchema null [""] schema_
+    location := InstantiatedSchema null "" schema_
     result := location.validate o --store=store_ --instance-pointer=JsonPointer
     return result.is-valid
 
@@ -637,19 +637,19 @@ An instantiated schema is a schema that has been resolved and has a dynamic loca
 */
 abstract class InstantiatedSchema:
   parent/InstantiatedSchema?
-  segments/List
-  schema/Schema
+  segment/string
+  schema/Schema?
 
-  constructor parent/InstantiatedSchema? segments/List schema/Schema:
-    return schema.instantiate --parent=parent --segments=segments
+  constructor parent/InstantiatedSchema? segment/string schema/Schema:
+    return schema.instantiate --parent=parent --segment=segment
 
-  constructor.from-sub_ .parent .segments .schema:
+  constructor.from-sub_ .parent .segment .schema:
+
+  operator [] segment/string -> InstantiatedSchema:
+    return InstantiatedSchemaGroup this segment
 
   operator [] segment/string sub-schema/Schema -> InstantiatedSchema:
-    return InstantiatedSchema this [segment] sub-schema
-
-  operator [] segment1/string segment2/string sub-schema/Schema -> InstantiatedSchema:
-    return InstantiatedSchema this [segment1, segment2] sub-schema
+    return InstantiatedSchema this segment sub-schema
 
   do-schema-resources --reversed [block]:
     if not reversed: throw "INVALID_ARGUMENT"
@@ -659,19 +659,27 @@ abstract class InstantiatedSchema:
     resources := []
     current := this
     while current != null:
-      current-resource := current.schema.schema-resource
-      if current-resource != last-resource:
-        resources.add current-resource
-        last-resource = current-resource
+      if current.schema:
+        current-resource := current.schema.schema-resource
+        if current-resource != last-resource:
+          resources.add current-resource
+          last-resource = current-resource
       current = current.parent
 
     resources.do --reversed block
 
   abstract validate o/any --store/Store --instance-pointer/JsonPointer -> Result_
 
+class InstantiatedSchemaGroup extends InstantiatedSchema:
+  constructor parent/InstantiatedSchema? segment/string:
+    super.from-sub_ parent segment null
+
+  validate o/any --store/Store --instance-pointer/JsonPointer -> Result_:
+    unreachable
+
 class InstantiatedSchemaObject extends InstantiatedSchema:
-  constructor parent/InstantiatedSchema? segments/List schema/Schema:
-    super.from-sub_ parent segments schema
+  constructor parent/InstantiatedSchema? segment/string schema/Schema:
+    super.from-sub_ parent segment schema
 
   schema_ -> Schema:
     return schema as Schema
@@ -699,8 +707,8 @@ class InstantiatedSchemaObject extends InstantiatedSchema:
     return result
 
 class InstantiatedSchemaBool extends InstantiatedSchema:
-  constructor parent/InstantiatedSchema? segments/List schema/Schema:
-    super.from-sub_ parent segments schema
+  constructor parent/InstantiatedSchema? segment/string schema/Schema:
+    super.from-sub_ parent segment schema
 
   validate o/any --store/Store --instance-pointer/JsonPointer -> Result_:
     result := Result_
@@ -753,14 +761,14 @@ class Schema:
       context.store.add result.schema-resource.uri.to-string result
     return result
 
-  instantiate --parent/InstantiatedSchema? --segments/List -> InstantiatedSchema:
+  instantiate --parent/InstantiatedSchema? --segment/string -> InstantiatedSchema:
     if json-value is bool:
-      return InstantiatedSchemaBool parent segments this
+      return InstantiatedSchemaBool parent segment this
     else:
       if not is-sorted_:
         actions.sort --in-place: | a/Action b/Action | a.order.compare-to b.order
         is-sorted_ = true
-      return InstantiatedSchemaObject parent segments this
+      return InstantiatedSchemaObject parent segment this
 
 class BuildContext:
   store/Store
@@ -926,9 +934,10 @@ class X-Of extends Applicator:
   validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
     if kind == ALL-OF:
       result := Result_
+      all-of-location := location["allOf"]
       for i := 0; i < subschemas.size; i++:
         subschema := subschemas[i]
-        subresult := location["allOf", "$i", subschema].validate o
+        subresult := all-of-location["$i", subschema].validate o
             --store=store
             --instance-pointer=instance-pointer
         if not subresult.is-valid:
@@ -938,10 +947,10 @@ class X-Of extends Applicator:
     else:
       success-count := 0
       result := Result_
-      first-segment := kind == ONE-OF ? "oneOf" : "anyOf"
+      x-of-location := location[kind == ANY-OF ? "anyOf" : "oneOf"]
       for i := 0; i < subschemas.size; i++:
         subschema := subschemas[i]
-        subresult := location[first-segment, "$i", subschema].validate o
+        subresult := x-of-location["$i", subschema].validate o
             --store=store
             --instance-pointer=instance-pointer
         if subresult.is-valid:
@@ -1015,9 +1024,10 @@ class DependentSchemas extends Applicator:
     result := Result_
     if o is not Map: return result
     map := o as Map
+    dependent-location := location["dependentSchemas"]
     subschemas.do: | key/string subschema/Schema |
       map.get key --if-present=: | value/any |
-        subresult := location["dependentSchemas", key, subschema].validate o
+        subresult := dependent-location[key, subschema].validate o
             --store=store
             --instance-pointer=instance-pointer
         if not subresult.is-valid:
@@ -1054,12 +1064,15 @@ class Properties extends Applicator:
     evaluated-matched-properties := {}
     evaluated-additional-properties := {}
 
+    properties-location := location["properties"]
+    patterns-location := location["patternProperties"]
+
     map.do: | key/string value/any |
       is-additional := true
       if properties and properties.contains key:
         evaluated-properties.add key
         is-additional = false
-        subresult := location["properties", key, properties[key]].validate value
+        subresult := properties-location[key, properties[key]].validate value
             --store=store
             --instance-pointer=instance-pointer[key]
         if not subresult.is-valid:
@@ -1073,7 +1086,7 @@ class Properties extends Applicator:
           if regex.match key:
             evaluated-matched-properties.add key
             is-additional = false
-            subresult := location["patternProperties", pattern, schema].validate value
+            subresult := patterns-location[pattern, schema].validate value
                 --store=store
                 --instance-pointer=instance-pointer[key]
             if not subresult.is-valid:
@@ -1350,10 +1363,11 @@ class Items extends Applicator:
     if o is not List: return result
     list := o as List
     items-location/InstantiatedSchema? := items ? location["items", items] : null
+    prefix-location := location["prefixItems"]
     for i := 0; i < list.size; i++:
       if prefix-items and i < prefix-items.size:
         prefix-schema/Schema := prefix-items[i]
-        subresult := location["prefixItems", "$i", prefix-items[i]].validate list[i]
+        subresult := prefix-location["$i", prefix-items[i]].validate list[i]
             --store=store
             --instance-pointer=instance-pointer[i]
         if not subresult.is-valid:
