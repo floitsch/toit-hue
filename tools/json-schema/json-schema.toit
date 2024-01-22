@@ -470,38 +470,66 @@ class HttpResourceLoader implements ResourceLoader:
       network.close
 
 class Result_:
+  location/InstantiatedSchema?
+  instance-pointer/JsonPointer
   is-valid/bool := true
   annotations/Map? := null
+  errors/List? := null
+
+  constructor .location .instance-pointer:
 
   /**
-  Merges the $other result into this one.
-  Reuses the $other result's fields if possible. This means that the $other result
+  Merges the $sub result into this one.
+  Reuses the $sub result's fields if possible. This means that the $sub result
     can not be used after this method is called.
   */
-  merge other/Result_ -> none:
-    assert: is-valid and other.is-valid
-    result := Result_
-    if not other.annotations:
+  merge sub/Result_ -> none:
+    assert: is-valid == sub.is-valid
+    if not is-valid:
+      if not sub.errors:
+        return
+      if not errors:
+        errors = sub.errors
+        return
+      errors.add-all sub.errors
+      return
+
+    if not sub.annotations:
       return
     if not annotations:
-      annotations = other.annotations
+      annotations = sub.annotations
       return
-    other.annotations.do: | key/string other-entries/List |
+    sub.annotations.do: | key/string sub-entries/List |
       this-entry := annotations.get key
       if not this-entry:
-        annotations[key] = other-entries
+        annotations[key] = sub-entries
       else:
-        this-entry.add-all other-entries
+        this-entry.add-all sub-entries
 
-  fail message/string:
-    annotations = null
+  fail-false -> none:
     is-valid = false
+    error := Detail.false-error
+        --instance-pointer=instance-pointer
+        --location=location
+    errors = [error]
+
+  fail -> none
+      keyword/string
+      message/string
+  :
+    is-valid = false
+    if not errors:
+      errors = []
+    error := Detail.error
+        --keyword=keyword
+        --instance-pointer=instance-pointer
+        --location=location
+        message
+    errors.add error
 
   annotate -> none
-      instance-pointer/JsonPointer
       keyword/string
       value/any
-      --location/InstantiatedSchema
   :
     if not annotations:
       annotations = {:}
@@ -516,7 +544,7 @@ class Result_:
 
 class Detail:
   is-error/bool
-  keyword/string
+  keyword/string?
   instance-pointer/JsonPointer
   location/InstantiatedSchema
   value/any
@@ -526,6 +554,11 @@ class Detail:
 
   constructor.error --.keyword --.instance-pointer --.location .value:
     is-error = true
+
+  constructor.false-error --.instance-pointer --.location:
+    is-error = true
+    keyword = null
+    value = "Thi instance is disallowed by a boolean 'false' schema."
 
 build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
   store := Store
@@ -685,7 +718,7 @@ class InstantiatedSchemaObject extends InstantiatedSchema:
     return schema as Schema
 
   validate o/any --store/Store --instance-pointer/JsonPointer -> Result_:
-    result := Result_
+    result := Result_ this instance-pointer
     schema_.actions.do: | action/Action |
       action-result/Result_ := ?
       if action is AnnotationsApplicator:
@@ -711,9 +744,9 @@ class InstantiatedSchemaBool extends InstantiatedSchema:
     super.from-sub_ parent segment schema
 
   validate o/any --store/Store --instance-pointer/JsonPointer -> Result_:
-    result := Result_
+    result := Result_ this instance-pointer
     if not schema.json-value:
-      result.fail "Value is false."
+      result.fail-false
     return result
 
 
@@ -842,42 +875,53 @@ abstract class Assertion extends Action:
     return Action.ORDER-EARLY
 
 abstract class SimpleAssertion extends Assertion:
-  abstract validate o/any -> Result_
+  abstract validate o/any [fail] -> none
 
   validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
-    return validate o
+    result := Result_ location instance-pointer
+    validate o: | keyword/string error-message/string |
+      result.fail keyword error-message
+    return result
 
 abstract class SimpleStringAssertion extends Assertion:
-  abstract validate str/string -> Result_
+  abstract validate str/string [fail] -> none
 
   validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
-    if o is not string:
-      return Result_
-    return validate o as string
+    result := Result_ location instance-pointer
+    if o is not string: return result
+    validate (o as string): | keyword/string error-message/string |
+      result.fail keyword error-message
+    return result
 
 abstract class SimpleNumAssertion extends Assertion:
-  abstract validate n/num -> Result_
+  abstract validate n/num [fail] -> none
 
   validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
-    if o is not num:
-      return Result_
-    return validate o as num
+    result := Result_ location instance-pointer
+    if o is not num: return result
+    validate (o as num): | keyword/string error-message/string |
+      result.fail keyword error-message
+    return result
 
 abstract class SimpleObjectAssertion extends Assertion:
-  abstract validate o/Map -> Result_
+  abstract validate o/Map [fail] -> none
 
   validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
-    if o is not Map:
-      return Result_
-    return validate o as Map
+    result := Result_ location instance-pointer
+    if o is not Map: return result
+    validate (o as Map): | keyword/string error-message/string |
+      result.fail keyword error-message
+    return result
 
 abstract class SimpleListAssertion extends Assertion:
-  abstract validate o/List -> Result_
+  abstract validate o/List [fail] -> none
 
   validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
-    if o is not List:
-      return Result_
-    return validate o as List
+    result := Result_ location instance-pointer
+    if o is not List: return result
+    validate (o as List): | keyword/string error-message/string |
+      result.fail keyword error-message
+    return result
 
 class Ref extends Applicator:
   target-uri/UriReference
@@ -932,8 +976,8 @@ class X-Of extends Applicator:
   constructor --.kind .subschemas:
 
   validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
+    result := Result_ location instance-pointer
     if kind == ALL-OF:
-      result := Result_
       all-of-location := location["allOf"]
       for i := 0; i < subschemas.size; i++:
         subschema := subschemas[i]
@@ -946,8 +990,8 @@ class X-Of extends Applicator:
       return result
     else:
       success-count := 0
-      result := Result_
-      x-of-location := location[kind == ANY-OF ? "anyOf" : "oneOf"]
+      keyword := kind == ANY-OF ? "anyOf" : "oneOf"
+      x-of-location := location[keyword]
       for i := 0; i < subschemas.size; i++:
         subschema := subschemas[i]
         subresult := x-of-location["$i", subschema].validate o
@@ -958,10 +1002,10 @@ class X-Of extends Applicator:
           result.merge subresult
       if kind == ONE-OF:
         if success-count != 1:
-          result.fail "Expected exactly one subschema to match."
+          result.fail keyword "Expected exactly one subschema to match."
       else if kind == ANY-OF:
         if success-count == 0:
-          result.fail "Expected at least one subschema to match."
+          result.fail keyword "Expected at least one subschema to match."
       else:
         unreachable
       return result
@@ -972,12 +1016,12 @@ class Not extends Applicator:
   constructor .subschema/Schema:
 
   validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
-    result := Result_
+    result := Result_ location instance-pointer
     subresult := location["not", subschema].validate o
         --store=store
         --instance-pointer=instance-pointer
     if subresult.is-valid:
-      result.fail "Expected subschema to fail."
+      result.fail "not" "Expected subschema to fail."
     return result
 
 class IfThenElse extends Applicator:
@@ -988,7 +1032,7 @@ class IfThenElse extends Applicator:
   constructor .condition-subschema/Schema .then-subschema/Schema? .else-subschema/Schema?:
 
   validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
-    result := Result_
+    result := Result_ location instance-pointer
     condition-result := location["if", condition-subschema].validate o
         --store=store
         --instance-pointer=instance-pointer
@@ -1021,7 +1065,7 @@ class DependentSchemas extends Applicator:
   constructor .subschemas/Map:
 
   validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
-    result := Result_
+    result := Result_ location instance-pointer
     if o is not Map: return result
     map := o as Map
     dependent-location := location["dependentSchemas"]
@@ -1031,7 +1075,7 @@ class DependentSchemas extends Applicator:
             --store=store
             --instance-pointer=instance-pointer
         if not subresult.is-valid:
-          result.fail "Dependent schema '$key' failed."
+          result.fail "dependentSchemas" "Dependent schema '$key' failed."
           return result
         result.merge subresult
     return result
@@ -1057,7 +1101,7 @@ class Properties extends Applicator:
       --location/InstantiatedSchema
       --instance-pointer/JsonPointer
   :
-    result := Result_
+    result := Result_ location instance-pointer
     if o is not Map: return result
     map := o as Map
     evaluated-properties := {}
@@ -1076,7 +1120,7 @@ class Properties extends Applicator:
             --store=store
             --instance-pointer=instance-pointer[key]
         if not subresult.is-valid:
-          result.fail "Property '$key' failed."
+          result.fail "properties" "Property '$key' failed."
           return result
         result.merge subresult
 
@@ -1090,7 +1134,7 @@ class Properties extends Applicator:
                 --store=store
                 --instance-pointer=instance-pointer[key]
             if not subresult.is-valid:
-              result.fail "Pattern for '$key' failed."
+              result.fail "patternProperties" "Pattern for '$key' failed."
               return result
             result.merge subresult
 
@@ -1100,16 +1144,16 @@ class Properties extends Applicator:
             --store=store
             --instance-pointer=instance-pointer[key]
         if not subresult.is-valid:
-          result.fail "Additional for '$key' failed."
+          result.fail "additionalProperties" "Additional for '$key' failed."
           return result
         result.merge subresult
 
     if not evaluated-properties.is-empty:
-      result.annotate instance-pointer "properties" evaluated-properties --location=location
+      result.annotate "properties" evaluated-properties
     if not evaluated-matched-properties.is-empty:
-      result.annotate instance-pointer "patternProperties" evaluated-matched-properties --location=location
+      result.annotate "patternProperties" evaluated-matched-properties
     if not evaluated-additional-properties.is-empty:
-      result.annotate instance-pointer "additionalProperties" evaluated-additional-properties --location=location
+      result.annotate "additionalProperties" evaluated-additional-properties
     return result
 
 class PropertyNames extends Applicator:
@@ -1118,7 +1162,7 @@ class PropertyNames extends Applicator:
   constructor .subschema/Schema:
 
   validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
-    result := Result_
+    result := Result_ location instance-pointer
     if o is not Map: return result
     map := o as Map
     sublocation := location["propertyNames", subschema]
@@ -1128,7 +1172,7 @@ class PropertyNames extends Applicator:
           // I don't think there is a way to point to the key of a property with a json pointer.
           --instance-pointer=instance-pointer
       if not subresult.is-valid:
-        result.fail "Property name '$key' failed."
+        result.fail "propertyNames" "Property name '$key' failed."
         return result
       result.merge subresult
     return result
@@ -1141,7 +1185,7 @@ class Contains extends Applicator:
   constructor .subschema/Schema --.min-contains --.max-contains:
 
   validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
-    result := Result_
+    result := Result_ location instance-pointer
     if o is not List: return result
     list := o as List
     success-count := 0
@@ -1158,16 +1202,16 @@ class Contains extends Applicator:
         result.merge subresult
     if min-contains:
       if success-count < min-contains:
-        result.fail "Expected at least $min-contains items to match."
+        result.fail "minContains" "Expected at least $min-contains items to match."
         return result
     else if success-count == 0:
-      result.fail "Expected at least one item to match."
+      result.fail "contains" "Expected at least one item to match."
       return result
     if max-contains and success-count > max-contains:
-      result.fail "Expected at most $max-contains items to match."
+      result.fail "maxContains" "Expected at most $max-contains items to match."
       return result
     annotation-value := contained-indexes == list.size ? true : contained-indexes
-    result.annotate instance-pointer "contains" annotation-value --location=location
+    result.annotate "contains" annotation-value
     return result
 
 class Type extends SimpleAssertion:
@@ -1175,21 +1219,19 @@ class Type extends SimpleAssertion:
 
   constructor .types/List:
 
-  validate o/any -> Result_:
-    result := Result_
+  validate o/any [fail] -> none:
     types.do: | type-string |
-      if type-string == "null" and o == null: return result
-      if type-string == "boolean" and o is bool: return result
-      if type-string == "object" and o is Map: return result
-      if type-string == "array" and o is List: return result
-      if type-string == "number" and o is num: return result
-      if type-string == "string" and o is string: return result
+      if type-string == "null" and o == null: return
+      if type-string == "boolean" and o is bool: return
+      if type-string == "object" and o is Map: return
+      if type-string == "array" and o is List: return
+      if type-string == "number" and o is num: return
+      if type-string == "string" and o is string: return
       if type-string == "integer":
-        if o is int: return result
+        if o is int: return
         // TODO(florian): This is not correct: to-int could throw.
-        if o is float and (o as float).to-int == o: return result
-    result.fail "Value type not one of $types"
-    return result
+        if o is float and (o as float).to-int == o: return
+    fail.call "type" "Value type not one of $types"
 
 structural-equals_ a/any b/any -> bool:
   if a is num and a == b: return true
@@ -1223,23 +1265,19 @@ class Enum extends SimpleAssertion:
 
   constructor .values/List:
 
-  validate o/any -> Result_:
-    result := Result_
+  validate o/any [fail] -> none:
     values.do: | value |
-      if structural-equals_ o value: return result
-    result.fail "Value not one of $values"
-    return result
+      if structural-equals_ o value: return
+    fail.call "enum" "Value not one of $values"
 
 class Const extends SimpleAssertion:
   value/any
 
   constructor .value/any:
 
-  validate o/any -> Result_:
-    result := Result_
+  validate o/any [fail] -> none:
     if not structural-equals_ o value:
-      result.fail "Value not equal to $value"
-    return result
+      fail.call "const" "Value not equal to $value"
 
 class NumComparison extends SimpleNumAssertion:
   static MULTIPLE-OF ::= 0
@@ -1253,29 +1291,22 @@ class NumComparison extends SimpleNumAssertion:
 
   constructor .n/num --.kind:
 
-  validate o/num -> Result_:
-    result := Result_
+  validate o/num [fail] -> none:
     if kind == MULTIPLE-OF:
       if o % n != 0.0:
-        result.fail "Value $o not a multiple of $n"
-      return result
-    if kind == MAXIMUM:
+        fail.call "multipleOf" "Value $o not a multiple of $n"
+    else if kind == MAXIMUM:
       if o > n:
-        result.fail "Value $o greater than $n"
-      return result
-    if kind == EXCLUSIVE-MAXIMUM:
+        fail.call "maximum" "Value $o greater than $n"
+    else if kind == EXCLUSIVE-MAXIMUM:
       if o >= n:
-        result.fail "Value $o greater than or equal to $n"
-      return result
-    if kind == MINIMUM:
+        fail.call "exclusiveMaximum" "Value $o greater than or equal to $n"
+    else if kind == MINIMUM:
       if o < n:
-        result.fail "Value $o less than $n"
-      return result
-    if kind == EXCLUSIVE-MINIMUM:
+        fail.call "minimum" "Value $o less than $n"
+    else if kind == EXCLUSIVE-MINIMUM:
       if o <= n:
-        result.fail "Value $o less than or equal to $n"
-      return result
-    throw "unreachable"
+        fail.call "exclusiveMinimum" "Value $o less than or equal to $n"
 
 class StringLength extends SimpleStringAssertion:
   min/int?
@@ -1283,16 +1314,12 @@ class StringLength extends SimpleStringAssertion:
 
   constructor --.min --.max:
 
-  validate str/string -> Result_:
-    result := Result_
+  validate str/string [fail] -> none:
     rune-size := str.size --runes
     if min and rune-size < min:
-      result.fail "String length $rune-size less than $min"
-      return result
+      fail.call "minLength" "String length $rune-size less than $min"
     if max and rune-size > max:
-      result.fail "String length $rune-size greater than $max"
-      return result
-    return result
+      fail.call "maxLength" "String length $rune-size greater than $max"
 
 class ArrayLength extends SimpleListAssertion:
   min/int?
@@ -1300,41 +1327,37 @@ class ArrayLength extends SimpleListAssertion:
 
   constructor --.min --.max:
 
-  validate o/List -> Result_:
-    result := Result_
+  validate o/List [fail] -> none:
     if min and o.size < min:
-      result.fail "Array length $o.size less than $min"
-      return result
+      fail.call "minLength" "Array length $o.size less than $min"
     if max and o.size > max:
-      result.fail "Array length $o.size greater than $max"
-      return result
-    return result
+      fail.call "maxLength" "Array length $o.size greater than $max"
 
 class UniqueItems extends SimpleListAssertion:
   constructor:
 
-  validate list/List -> Result_:
-    result := Result_
+  validate list/List [fail] -> none:
     // For simplicity do an O(n^2) algorithm.
     for i := 0; i < list.size; i++:
       for j := i + 1; j < list.size; j++:
         if structural-equals_ list[i] list[j]:
-          result.fail "Array contains duplicate items."
-          return result
-    return result
+          fail.call "uniqueItems" "Array contains duplicate items."
+          return
 
 class Required extends SimpleObjectAssertion:
   properties/List
 
   constructor .properties/List:
 
-  validate map/Map -> Result_:
-    result := Result_
+  validate map/Map [fail] -> none:
+    missing := []
     properties.do: | property |
       if not map.contains property:
-        result.fail "Required property '$property' missing."
-        return result
-    return result
+        missing.add property
+    if missing.size == 1:
+      fail.call "required" "Required property '$missing.first' missing."
+    else if missing.size > 1:
+      fail.call "required" "Required properties $((missing.map: "'$it'").join ", ") missing."
 
 class ObjectSize extends SimpleObjectAssertion:
   min/int?
@@ -1342,15 +1365,11 @@ class ObjectSize extends SimpleObjectAssertion:
 
   constructor --.min --.max:
 
-  validate map/Map -> Result_:
-    result := Result_
+  validate map/Map [fail] -> none:
     if min and map.size < min:
-      result.fail "Object size $map.size less than $min"
-      return result
+      fail.call "minProperties" "Object size $map.size less than $min"
     if max and map.size > max:
-      result.fail "Object size $map.size greater than $max"
-      return result
-    return result
+      fail.call "maxProperties" "Object size $map.size greater than $max"
 
 class Items extends Applicator:
   prefix-items/List?
@@ -1359,7 +1378,7 @@ class Items extends Applicator:
   constructor --.prefix-items --.items:
 
   validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
-    result := Result_
+    result := Result_ location instance-pointer
     if o is not List: return result
     list := o as List
     items-location/InstantiatedSchema? := items ? location["items", items] : null
@@ -1371,7 +1390,7 @@ class Items extends Applicator:
             --store=store
             --instance-pointer=instance-pointer[i]
         if not subresult.is-valid:
-          result.fail "Prefix item $i failed."
+          result.fail "prefixItems" "Prefix item $i failed."
           return result
         result.merge subresult
       else if items:
@@ -1379,14 +1398,14 @@ class Items extends Applicator:
             --store=store
             --instance-pointer=instance-pointer[i]
         if not subresult.is-valid:
-          result.fail "Item $i failed."
+          result.fail "items" "Item $i failed."
           return result
         result.merge subresult
     if prefix-items:
       annotation-value := prefix-items.size < list.size ? prefix-items.size : true
-      result.annotate instance-pointer "prefixItems" annotation-value --location=location
+      result.annotate "prefixItems" annotation-value
     if items:
-      result.annotate instance-pointer "items" true --location=location
+      result.annotate "items" true
     return result
 
 class Pattern extends SimpleStringAssertion:
@@ -1396,26 +1415,27 @@ class Pattern extends SimpleStringAssertion:
   constructor .pattern:
     regex_ = regex.parse pattern
 
-  validate str/string -> Result_:
-    result := Result_
+  validate str/string [fail] -> none:
     if not regex_.match str:
-      result.fail "String '$str' does not match pattern '$pattern'"
-    return result
+      fail.call "pattern" "String '$str' does not match pattern '$pattern'"
 
 class DependentRequired extends SimpleObjectAssertion:
   properties/Map
 
   constructor .properties/Map:
 
-  validate map/Map -> Result_:
-    result := Result_
+  validate map/Map [fail] -> none:
+    missing := []
     properties.do: | key/string required/List |
       if map.contains key:
         required.do: | property |
           if not map.contains property:
-            result.fail "Depending required property '$property' missing."
-            return result
-    return result
+            missing.add property
+
+    if missing.size == 1:
+      fail.call "dependentRequired" "Required property '$missing.first' missing."
+    else if missing.size > 1:
+      fail.call "dependentRequired" "Required properties $((missing.map: "'$it'").join ", ") missing."
 
 class UnevaluatedProperties extends AnnotationsApplicator:
   static EVALUATED-ANNOTATION-KEYS_ ::= [
@@ -1437,7 +1457,7 @@ class UnevaluatedProperties extends AnnotationsApplicator:
       --instance-pointer/JsonPointer
       --annotations/Map?
   :
-    result := Result_
+    result := Result_ location instance-pointer
     if o is not Map: return result
 
     evaluated := {}
@@ -1459,10 +1479,10 @@ class UnevaluatedProperties extends AnnotationsApplicator:
             --store=store
             --instance-pointer=instance-pointer[key]
         if not subresult.is-valid:
-          result.fail "Unevaluated property '$key' failed."
+          result.fail "unevaluatedProperties" "Unevaluated property '$key' failed."
           return result
         result.merge subresult
-    result.annotate instance-pointer "unevaluatedProperties" new-evaluated --location=location
+    result.annotate "unevaluatedProperties" new-evaluated
     return result
 
 class UnevaluatedItems extends AnnotationsApplicator:
@@ -1479,7 +1499,7 @@ class UnevaluatedItems extends AnnotationsApplicator:
       --instance-pointer/JsonPointer
       --annotations/Map?
   :
-    result := Result_
+    result := Result_ location instance-pointer
     if o is not List: return result
     list := o as List
     first-unevaluated := 0
@@ -1523,11 +1543,11 @@ class UnevaluatedItems extends AnnotationsApplicator:
           --store=store
           --instance-pointer=instance-pointer[i]
       if not subresult.is-valid:
-        result.fail "Unevaluated item at position '$i' failed."
+        result.fail "unevaluatedItems" "Unevaluated item at position '$i' failed."
         return result
       result.merge subresult
     if needs-annotation:
-      result.annotate instance-pointer "unevaluatedItems" true --location=location
+      result.annotate "unevaluatedItems" true
     return result
 
 class Annotation extends Assertion:
@@ -1537,8 +1557,8 @@ class Annotation extends Assertion:
   constructor .keyword .value:
 
   validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
-    result_ := Result_
-    result_.annotate instance-pointer keyword value --location=location
+    result_ := Result_ location instance-pointer
+    result_.annotate keyword value
     return result_
 
 class Format extends Assertion:
@@ -1547,7 +1567,7 @@ class Format extends Assertion:
   constructor .format/string:
 
   validate o/any --store/Store --location/InstantiatedSchema --instance-pointer/JsonPointer -> Result_:
-    result := Result_
-    result.annotate instance-pointer "format" format --location=location
+    result := Result_ location instance-pointer
+    result.annotate "format" format
     // TODO(florian): Implement validation and give a way for users to add their own formats.
     return result
