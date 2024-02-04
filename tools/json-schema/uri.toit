@@ -241,6 +241,7 @@ class UriReference:
     return (Authority.parse authority).normalize.to-string
 
   static normalize-path path/string -> string:
+    // TODO(florian): have a normalize-percent-encoding-path that handles '/'.
     if path == "": return ""
     segments := path.split "/"
     segments.map --in-place: normalize-percent-encoding_ it
@@ -252,6 +253,7 @@ class UriReference:
 
   static normalize-fragment fragment/string? -> string?:
     if not fragment: return null
+    // TODO(florian): have a normalize-percent-encoding-fragment that allows $, /, ...
     return normalize-percent-encoding_ fragment
 
   normalize -> UriReference:

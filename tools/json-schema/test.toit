@@ -69,7 +69,7 @@ run-tests test-json/List --resource-loader/json-schema.ResourceLoader [--print-h
     entry["tests"].do: | test/Map |
       result/json-schema.Result? := null
       test-exception := catch --trace:
-        result = schema.validate test["data"] --no-collect-annotations
+        result = schema.validate test["data"] --collect-annotations --no-collect-all-errors
       is-valid := result ? result.is-valid : false
       if test-exception: is-valid = not test["valid"]
       if test["valid"] == is-valid: success-counter++
