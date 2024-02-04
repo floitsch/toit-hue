@@ -555,29 +555,32 @@ class SubResult:
   Merges the $sub result into this one.
   Reuses the $sub result's fields if possible. This means that the $sub result
     can not be used after this method is called.
+
+  If the given $sub is not valid, marks this instance as not valid.
+
+  Only merges annotations if the $sub is valid.
   */
   merge sub/SubResult -> none:
-    assert: is-valid == sub.is-valid
-    if not is-valid:
-      if not sub.errors:
-        return
+    if not sub.is-valid:
+      is-valid = false
+
+    if sub.errors:
+      assert: not sub.is-valid
       if not errors:
         errors = sub.errors
-        return
-      errors.add-all sub.errors
-      return
-
-    if not sub.annotations:
-      return
-    if not annotations:
-      annotations = sub.annotations
-      return
-    sub.annotations.do: | key/string sub-entries/List |
-      this-entry := annotations.get key
-      if not this-entry:
-        annotations[key] = sub-entries
       else:
-        this-entry.add-all sub-entries
+        errors.add-all sub.errors
+
+    if sub.is-valid and sub.annotations:
+      if not annotations:
+        annotations = sub.annotations
+      else:
+        sub.annotations.do: | key/string sub-entries/List |
+          this-entry := annotations.get key
+          if not this-entry:
+            annotations[key] = sub-entries
+          else:
+            this-entry.add-all sub-entries
 
   fail-false -> none:
     is-valid = false
@@ -589,6 +592,7 @@ class SubResult:
   fail -> none
       keyword/string
       message/string
+      --instance-pointer=instance-pointer
   :
     is-valid = false
     if not errors:
@@ -652,9 +656,19 @@ class Detail:
   to-json --include-valid/bool=false:
     result := {:}
     if include-valid: result["valid"] = not is-error
-    result["keywordLocation"] = keyword
-        ? instance-pointer[keyword].to-string
-        : instance-pointer.to-string
+    keyword-location := keyword ? [keyword] : []
+    current/InstantiatedSchema? := location
+    while current:
+      keyword-location.add current.segment
+      current = current.parent
+    i := 0
+    j := keyword-location.size - 1
+    while i < j:
+      t := keyword-location[i]
+      keyword-location[i++] = keyword-location[j]
+      keyword-location[j--] = t
+
+    result["keywordLocation"] = keyword-location.join "/"
     result["absoluteKeywordLocation"] = location.schema.absolute-location.to-string
     result["instanceLocation"] = instance-pointer.to-string
     if is-error:
@@ -710,12 +724,12 @@ class JsonSchema:
 
   constructor .schema_ .store_:
 
-  validate o/any --collect-annotations/bool=true -> Result:
+  validate o/any --collect-annotations/bool=true --collect-all-errors/bool=false -> Result:
     location := InstantiatedSchema null "" schema_
     context := ValidationContext
         --store=store_
-        --needs-all-errors=false
-        --needs-annotations=true
+        --needs-all-errors=collect-all-errors
+        --needs-annotations=collect-annotations
     subresult := location.validate o --context=context --instance-pointer=JsonPointer
     return Result.private_ subresult
 
@@ -864,9 +878,9 @@ class InstantiatedSchemaObject extends InstantiatedSchema:
             --context=context
             --location=this
             --instance-pointer=instance-pointer
-      if not action-result.is-valid:
-        return action-result
       result.merge action-result
+      if not context.needs-all-errors and not result.is-valid:
+        return action-result
 
     return result
 
@@ -1148,9 +1162,11 @@ class X-Of extends Applicator:
         subresult := all-of-location["$i", subschema].validate o
             --context=context
             --instance-pointer=instance-pointer
-        if not subresult.is-valid:
-          return subresult
         result.merge subresult
+        if not subresult.is-valid and not context.needs-all-errors:
+            return subresult
+      if not result.is-valid:
+        result.fail "allOf" "Expected all subschemas to match."
       return result
     else:
       success-count := 0
@@ -1250,10 +1266,11 @@ class DependentSchemas extends Applicator:
         subresult := dependent-location[key, subschema].validate o
             --context=context
             --instance-pointer=instance-pointer
+        result.merge subresult
         if not subresult.is-valid:
           result.fail "dependentSchemas" "Dependent schema '$key' failed."
-          return result
-        result.merge subresult
+          if not context.needs-all-errors:
+            return result
     return result
 
 class Properties extends Applicator:
@@ -1288,17 +1305,19 @@ class Properties extends Applicator:
     patterns-location := location["patternProperties"]
 
     map.do: | key/string value/any |
+      sub-pointer := instance-pointer[key]
       is-additional := true
       if properties and properties.contains key:
         evaluated-properties.add key
         is-additional = false
         subresult := properties-location[key, properties[key]].validate value
             --context=context
-            --instance-pointer=instance-pointer[key]
-        if not subresult.is-valid:
-          result.fail "properties" "Property '$key' failed."
-          return result
+            --instance-pointer=sub-pointer
         result.merge subresult
+        if not subresult.is-valid:
+          result.fail "properties" "Property '$key' failed." --instance-pointer=sub-pointer
+          if not context.needs-all-errors:
+            return result
 
       if patterns:
         patterns.do: | pattern/string schema/Schema |
@@ -1308,21 +1327,27 @@ class Properties extends Applicator:
             is-additional = false
             subresult := patterns-location[pattern, schema].validate value
                 --context=context
-                --instance-pointer=instance-pointer[key]
-            if not subresult.is-valid:
-              result.fail "patternProperties" "Pattern for '$key' failed."
-              return result
+                --instance-pointer=sub-pointer
             result.merge subresult
+            if not subresult.is-valid:
+              result.fail "patternProperties"
+                  "Pattern for '$key' failed."
+                  --instance-pointer=sub-pointer
+              if not context.needs-all-errors:
+                return result
 
       if is-additional and additional:
         evaluated-additional-properties.add key
         subresult := location["additionalProperties", additional].validate value
             --context=context
-            --instance-pointer=instance-pointer[key]
-        if not subresult.is-valid:
-          result.fail "additionalProperties" "Additional for '$key' failed."
-          return result
+            --instance-pointer=sub-pointer
         result.merge subresult
+        if not subresult.is-valid:
+          result.fail "additionalProperties"
+              "Additional for '$key' failed."
+              --instance-pointer=sub-pointer
+          if not context.needs-all-errors:
+            return result
 
     if context.needs-annotations:
       if not evaluated-properties.is-empty:
@@ -1574,23 +1599,26 @@ class Items extends Applicator:
     items-location/InstantiatedSchema? := items ? location["items", items] : null
     prefix-location := location["prefixItems"]
     for i := 0; i < list.size; i++:
+      sub-pointer := instance-pointer[i]
       if prefix-items and i < prefix-items.size:
         prefix-schema/Schema := prefix-items[i]
         subresult := prefix-location["$i", prefix-items[i]].validate list[i]
             --context=context
-            --instance-pointer=instance-pointer[i]
-        if not subresult.is-valid:
-          result.fail "prefixItems" "Prefix item $i failed."
-          return result
+            --instance-pointer=sub-pointer
         result.merge subresult
+        if not subresult.is-valid:
+          result.fail "prefixItems" "Prefix item $i failed." --instance-pointer=sub-pointer
+          if not context.needs-all-errors:
+            return result
       else if items:
         subresult := items-location.validate list[i]
             --context=context
             --instance-pointer=instance-pointer[i]
-        if not subresult.is-valid:
-          result.fail "items" "Item $i failed."
-          return result
         result.merge subresult
+        if not subresult.is-valid:
+          result.fail "items" "Item $i failed." --instance-pointer=sub-pointer
+          if not context.needs-all-errors:
+            return result
     if context.needs-annotations:
       if prefix-items:
         annotation-value := prefix-items.size < list.size ? prefix-items.size : true
@@ -1670,13 +1698,17 @@ class UnevaluatedProperties extends AnnotationsApplicator:
     map.do: | key/string value/any |
       if not evaluated.contains key:
         new-evaluated.add key
+        sub-pointer := instance-pointer[key]
         subresult := unevaluated-location.validate value
             --context=context
-            --instance-pointer=instance-pointer[key]
-        if not subresult.is-valid:
-          result.fail "unevaluatedProperties" "Unevaluated property '$key' failed."
-          return result
+            --instance-pointer=sub-pointer
         result.merge subresult
+        if not subresult.is-valid:
+          result.fail "unevaluatedProperties"
+              "Unevaluated property '$key' failed."
+              --instance-pointer=sub-pointer
+          if not context.needs-all-errors:
+            return result
     if context.needs-annotations:
       result.annotate "unevaluatedProperties" new-evaluated
     return result
@@ -1739,13 +1771,17 @@ class UnevaluatedItems extends AnnotationsApplicator:
         continue
       needs-annotation = true
       item := list[i]
+      sub-pointer := instance-pointer[i]
       subresult := sublocation.validate item
           --context=context
-          --instance-pointer=instance-pointer[i]
-      if not subresult.is-valid:
-        result.fail "unevaluatedItems" "Unevaluated item at position '$i' failed."
-        return result
+          --instance-pointer=sub-pointer
       result.merge subresult
+      if not subresult.is-valid:
+        result.fail "unevaluatedItems"
+            "Unevaluated item at position '$i' failed."
+            --instance-pointer=sub-pointer
+        if not context.needs-all-errors:
+          return result
     if needs-annotation:
       result.annotate "unevaluatedItems" true
     return result
