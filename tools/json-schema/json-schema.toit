@@ -670,10 +670,12 @@ class Detail:
     if keyword: absolute-location += "/$keyword"
     result["absoluteKeywordLocation"] = absolute-location
     result["instanceLocation"] = instance-pointer.to-string
+    json-value := value
+    if json-value is Set: json-value = json-value.to-list
     if is-error:
-      result["error"] = value
+      result["error"] = json-value
     else:
-      result["annotation"] = value
+      result["annotation"] = json-value
     return result
 
 build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
@@ -755,6 +757,7 @@ It sets the URL for all contained schemas that are relative to the resource.
 class SchemaResource_:
   uri/UriReference
   vocabularies/Map  // The dialect of this schema resource.
+  handled-keywords/Set  // The keywords handled by the vocabularies.
 
   constructor o/any --parent/Schema? --base-uri/UriReference? --build-context/BuildContext:
     id/string? := o is Map ? o.get "\$id" : null
@@ -797,6 +800,10 @@ class SchemaResource_:
           throw "Unknown vocabulary: $vocabulary-uri"
         if vocabulary:
           vocabularies[vocabulary-uri] = vocabulary
+
+    handled-keywords = {}
+    vocabularies.do: | _ vocabulary/Vocabulary |
+      handled-keywords.add-all vocabulary.keywords
 
 /**
 An instantiated schema is a schema that has been resolved and has a dynamic location in the schema tree.
@@ -936,6 +943,11 @@ class Schema:
     if o is Map:
       result.schema-resource.vocabularies.do: | _ vocabulary/Vocabulary |
         vocabulary.add-actions --schema=result --context=context --json-pointer=json-pointer
+
+      // All keywords that are not handled by the dialect are treated like annotations.
+      o.do: | key/string value/any |
+        if not result.schema-resource.handled-keywords.contains key:
+          result.add-assertion (Annotation key value)
 
     context.store.add schema-json-pointer-url.to-string result
     if json-pointer.to-fragment-string == "":
