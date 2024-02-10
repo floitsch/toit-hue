@@ -484,18 +484,6 @@ class Result:
   See $Detail.to-json for the structure of the annotations and errors.
   */
   static STRUCTURE-BASIC ::= 1
-  /**
-  When this result is converted to JSON with the structure equal to $STRUCTURE-DETAILED,
-    then the returned object contains the following fields:
-  - "valid": A boolean indicating whether the validation was successful.
-  - "annotations"/"errors": A list of annotations or errors, depending on $is-valid.
-    Nested annotations (as per the keyword-location) are stored in the details.
-
-  In this case, each detail (annotation/error) also has a field "valid".
-
-  See $Detail.to-json for the structure of the annotations and errors.
-  */
-  static STRUCTURE-DETAILED ::= 2
 
   // The result of the root schema.
   schema-result_/SubResult
@@ -512,7 +500,7 @@ class Result:
   /** A list of details of type $Detail. */
   details -> List:
     if not schema-result_.is-valid:
-      return schema-result_.errors or []
+      return schema-result_.errors.copy or []
     if not schema-result_.annotations: return []
 
     annotations := []
@@ -523,24 +511,35 @@ class Result:
   /**
   Returns this result as a JSON object.
 
-  If the validation was successful ($is-valid is true), then the
-    returned object contains the following fields:
-  - "valid": true
-  - "annotations": A list of map from instance pointers to lists of annotations.
+  Dependening on the $structure-kind, the returned object has different fields.
+
+  If $structure-kind is equal to $STRUCTURE-FLAG, then the returned object consists
+    of a map with a single field:
+  - "valid": A boolean indicating whether the validation was successful.
+
+  If $structure-kind is equal to $STRUCTURE-BASIC, then the returned object consists
+    of a map with the following fields:
+  - "valid": A boolean indicating whether the validation was successful.
+  - "annotations": A list of annotations. This field is only present if the validation
+    was successful. See $Detail.to-json for the structure of the annotations.
+  - "errors": A list of map from instance pointers to lists of errors. This field is
+    only present if the validation was not successful. See $Detail.to-json for the
+    structure of the errors.
   */
   to-json --structure-kind/int=STRUCTURE-BASIC -> Map:
+    if structure-kind != STRUCTURE-FLAG and structure-kind != STRUCTURE-BASIC:
+      throw "INVALID_ARGUMENT"
+
     if structure-kind == STRUCTURE-FLAG:
       return {"valid": is-valid}
 
     json-details := details.map: | detail/Detail |
-      detail.to-json --include-valid=(structure-kind == STRUCTURE-DETAILED)
+      detail.to-json
 
-    result := {
+    return {
       "valid": is-valid,
       is-valid ? "annotations" : "errors": json-details
     }
-
-    return result
 
 class SubResult:
   location/InstantiatedSchema?
@@ -644,7 +643,6 @@ class Detail:
   Converts this detail to JSON.
 
   The returned object contains the following fields:
-  - `valid`: if $include-valid is true.
   - `keywordLocation`: the relative location, as JSON pointer, of the keyword that
     produced the detail.
   - `absoluteKeywordLocation`: the absolute, dereferenced location of the keyword
@@ -653,9 +651,8 @@ class Detail:
   - `instanceLocation`: the location, as JSON pointer, of the JSON value within the
     instance that produced the detail.
   */
-  to-json --include-valid/bool=false:
+  to-json:
     result := {:}
-    if include-valid: result["valid"] = not is-error
     keyword-location := keyword ? [keyword] : []
     current/InstantiatedSchema? := location
     while current:
