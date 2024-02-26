@@ -33,6 +33,7 @@ KNOWN-VOCABULARIES ::= {
   VocabularyMetaData.URI: VocabularyMetaData,
   VocabularyFormatAnnotation.URI: VocabularyFormatAnnotation,
   VocabularyContent.URI: VocabularyContent,
+  VocabularyOpenApi.URI: VocabularyOpenApi,
 }
 
 interface Vocabulary:
@@ -61,10 +62,6 @@ class VocabularyCore implements Vocabulary:
   keywords -> List:
     return KEYWORDS
 
-  static resolve-ref_ ref/string --schema-resource/SchemaResource_ -> UriReference:
-    reference := (UriReference.parse ref).normalize
-    return reference.resolve --base=schema-resource.uri
-
   add-actions --schema/Schema --context/BuildContext --json-pointer/JsonPointer -> none:
     json := schema.json-value
     json.get "\$anchor" --if-present=: | anchor-id/string |
@@ -78,13 +75,13 @@ class VocabularyCore implements Vocabulary:
       context.store.add --dynamic anchor-uri.to-string schema --fragment=normalized-fragment
 
     json.get "\$ref" --if-present=: | ref/string |
-      target-uri := resolve-ref_ ref --schema-resource=schema.schema-resource
+      target-uri := schema.uri-reference ref
       applicator := Ref --target-uri=target-uri --is-dynamic=false
       context.refs.add applicator
       schema.add-applicator applicator
 
     json.get "\$dynamicRef" --if-present=: | ref/string |
-      target-uri := resolve-ref_ ref --schema-resource=schema.schema-resource
+      target-uri := schema.uri-reference ref
       applicator := Ref --target-uri=target-uri --is-dynamic
       context.refs.add applicator
       schema.add-applicator applicator
@@ -437,6 +434,197 @@ class VocabularyContent extends VocabularyAnnotationBase:
   keywords -> List:
     return KEYWORDS
 
+/**
+Vocabulary for OpenAPI.
+
+The OpenAPI specification is geared towards their OpenAPI specifications and
+  is relatively vague on how to correctly implement the vocabulary outside
+  the context of OpenAPI. Specifically, OpenAPI uses the term "parent", which
+  is neither defined in the OpenAPI specification, nor the JSON Schema.
+  It is also not giving any guidance on corner cases that could arrive
+  when using the discriminator keyword.
+
+The OpenAPI vocabulary is relatively invasive. It required changes to the
+  following parts of this library:
+- The X-Of applicator: Can now be disabled, since the discriminator "shadows"
+  the functionality.
+- Schemas: Due to the implicit 'all-of' targets, it's necessary to guard
+  schemas that are in an 'allOf' chain so that there isn't any infinite
+  recursion.
+*/
+class VocabularyOpenApi implements Vocabulary:
+  static URI ::= "https://spec.openapis.org/oas/3.1/dialect/base"
+
+  static KEYWORDS ::= [
+    "discriminator",
+    "xml",
+    "externalDocs",
+    "example",  // Deprecated but still supported.
+  ]
+
+  uri -> string:
+    return URI
+
+  keywords -> List:
+    return KEYWORDS
+
+  add-actions --schema/Schema --context/BuildContext --json-pointer/JsonPointer -> none:
+    json := schema.json-value
+
+    // The 'discriminator' keyword is handled by the X-Of applicator.
+    [ "xml", "externalDocs", "example" ].do: | keyword/string |
+      json.get keyword --if-present=: | value/any |
+        schema.add-assertion (Annotation keyword value)
+
+    json.get "discriminator" --if-present=: | discriminator-json/any |
+      property-name := discriminator-json.get "propertyName" --if-absent=:
+        throw "Missing 'propertyName' in 'discriminator' keyword."
+      mapping := discriminator-json.get "mapping"
+      uri-ref-mapping/Map? := null
+      if mapping:
+        uri-ref-mapping = mapping.map: | _ ref/string |
+          schema.uri-reference ref
+      discriminator := Discriminator property-name uri-ref-mapping
+      context.discriminators.add [discriminator, schema]
+      schema.add-applicator discriminator
+
+  static flatten_ schema/Schema tree/Map --seen/Set --result/List -> none:
+    absolute-location := schema.absolute-location
+    if seen.contains absolute-location:
+      throw "Recursive all-of loop"
+    seen.add absolute-location
+    parents := tree.get absolute-location
+    if not parents: return
+    parents.do: | parent/Schema |
+      flatten_ parent tree --seen=seen --result=result
+      result.add parent
+
+  /**
+  Computes the all-of hierarchy.
+
+  We consider a schema to be a "parent" of another schema, if it is the
+    target of a 'ref' inside an 'allOf' keyword.
+
+  Returns a map from schema URI to a list of schemas that have the schema
+    as a parent.
+  */
+  static compute-all-of-hierarchy_ context/BuildContext -> Map:
+    seen := {}  // Set of schema URIs that have already been seen.
+    // The tree is a map from schema URI to a list of schemas.
+    // Any entry in the value means that the key is the target of an 'allOf' keyword.
+    // Only considers 'refs' in the all-of keywords.
+    tree := {:}
+    context.store.do: | uri/string schema/Schema |
+      // Schemas may exist under multiple URIs in the store.
+      // Make sure we look at each one only once.
+      if seen.contains schema.absolute-location: continue.do
+      seen.add schema.absolute-location
+
+      schema.actions.do: | action/Action |
+        if action is X-Of:
+          x-of := action as X-Of
+          if x-of.kind == X-Of.ALL-OF:
+            x-of.subschemas.do: | subschema/Schema |
+              subactions := subschema.actions
+              if subschema.actions.size != 1:
+                continue.do
+              subaction := subactions.first
+              if subaction is not Ref or (subaction as Ref).is-dynamic:
+                continue.do
+              ref := subaction as Ref
+              target-uri := ref.target.absolute-location
+              (tree.get target-uri --init=:[]).add schema
+
+    return tree
+
+  /**
+  Resolves the discriminators.
+
+  Builds the map from identifier to schema for the discriminators.
+  All references must be resolved before calling this method.
+  */
+  static resolve-discriminators --context/BuildContext -> none:
+    all-of-hierarchy := compute-all-of-hierarchy_ context
+
+    all-of-hierarchy-parents := {:}
+    all-of-hierarchy.do: | parent-url/UriReference children/List |
+      children.do: | child/Schema |
+        all-of-hierarchy-parents[child.absolute-location] = parent-url
+
+    one-of-schemas := {:}  // From schema-uri to list of options.
+    all-of-schemas := {:}  // From schema-UriReference to Discriminator.
+
+    context.discriminators.do: | entry/List |
+      discriminator/Discriminator := entry[0]
+      schema/Schema := entry[1]
+
+      discriminator.all-of-hierarchy-parents = all-of-hierarchy-parents
+
+      // See if the schema contains an `anyOf` or `oneOf` keyword.
+      x-of/X-Of? := null
+      for i := 0; i < schema.actions.size; i++:
+        action := schema.actions[i]
+        if action is X-Of:
+          potential-x-of := action as X-Of
+          if potential-x-of.kind == X-Of.ANY-OF or potential-x-of.kind == X-Of.ONE-OF:
+            x-of = potential-x-of
+            break
+
+      // Map from uri to schema.
+      implicit-targets/List := ?
+      if x-of:
+        // This discriminator will do the job of the x-of.
+        x-of.is-disabled = true
+
+        implicit-targets = x-of.subschemas.map: | subschema/Schema |
+          if subschema is not Ref or (subschema as Ref).is-dynamic:
+            throw "Invalid discriminator schema with 'anyOf' or 'oneOf' keyword. Only references are allowed."
+          ref := subschema as Ref
+          target := ref.target
+          if not target:
+            throw "Unresolved target for ref that is used in discriminator."
+          target
+      else:
+        // The schema containing this discriminator doesn't have any
+        // x-of keyword. This means we need to use all "parents" (having
+        // this schema as `allOf`)
+        // The specification isn't really clear on how to find parents. We
+        // just find schemas that have the discriminator-keyword as transitive
+        // 'allOf'.
+        // See https://github.com/OAI/OpenAPI-Specification/issues/3591.
+        implicit-targets = []
+        flatten_ schema all-of-hierarchy --seen={} --result=implicit-targets
+        schema.all-of-discriminator = discriminator
+        implicit-targets.do: | child/Schema |
+            child.all-of-discriminator = discriminator
+
+      inverted-mapping := {:}
+      if discriminator.mapping:
+        discriminator.mapping.do: | key/any value/UriReference |
+          inverted-mapping[value] = key
+
+      resolved-mapping := {:}
+
+      implicit-targets.do: | schema/Schema |
+        explicit-mapping/string? := inverted-mapping.get schema.absolute-location
+        if explicit-mapping:
+          resolved-mapping[explicit-mapping] = schema
+        else:
+          // Find the implicit name of the schema.
+          segments := schema.json-pointer.segments
+          i := segments.size - 1
+          while i > 0:
+            // The OpenAPI spec isn't really clear on how to find the name, but
+            // the following approach works with the examples they give.
+            // In practice we probably only remove one 'allOf'.
+            if segments[i] != "allOf":
+              break
+            i--
+          resolved-mapping[segments[i]] = schema
+
+      discriminator.kind = x-of ? x-of.kind : X-Of.ALL-OF
+      discriminator.resolved-mapping = resolved-mapping
+
 DEFAULT-VOCABULARIES ::= {
   VocabularyCore.URI: VocabularyCore,
   VocabularyApplicator.URI: VocabularyApplicator,
@@ -717,6 +905,9 @@ build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
       dynamic-fragment := store.get-dynamic-fragment target
       ref.set-target resolved --dynamic-fragment=dynamic-fragment
 
+  if not context.discriminators.is-empty:
+    VocabularyOpenApi.resolve-discriminators --context=context
+
   return JsonSchema root-schema store
 
 class JsonSchema:
@@ -858,6 +1049,25 @@ class InstantiatedSchemaObject extends InstantiatedSchema:
     return schema as Schema
 
   validate o/any --context/ValidationContext --instance-pointer/JsonPointer -> SubResult:
+    if schema_.all-of-discriminator:
+      // This is a schema that is the target of a ref in an allOf chain.
+      // If we entering the chain, we have to call the discriminator.
+      // Otherwise we do the normal validation.
+      if segment == "\$ref" and
+          parent and parent.parent and parent.parent.segment == "allOf":
+        // We are already in the chain.
+        // Do the normal validation (by falling through).
+      else if segment == "discriminator":
+        // We are beginning the chain.
+        // Do the normal validation (by falling through).
+      else:
+        // Use the discriminator.
+        return schema_.all-of-discriminator.validate o
+            --context=context
+            --location=this
+            --instance-pointer=instance-pointer
+            --required-hierarchy-schema=schema_
+
     if not context.needs-annotations:
       // Check if one of our actions need annotation.
       action-needs-annotations := schema_.actions.any: | action/Action |
@@ -902,11 +1112,19 @@ class InstantiatedSchemaBool extends InstantiatedSchema:
 
 
 class Schema:
+  json-pointer/JsonPointer
   json-value/any
   schema-resource/SchemaResource_? := ?
   is-resolved/bool := false
   is-sorted_/bool := false
   absolute-location/UriReference
+
+  /**
+  If this schema is in an all-of chain where the super-parent has an
+    OpenAPI discriminator, then this is the discriminator of that super parent.
+
+  */
+  all-of-discriminator/Discriminator? := null
 
   actions/List ::= []
 
@@ -916,7 +1134,7 @@ class Schema:
   add-assertion assertion/Assertion:
     actions.add assertion
 
-  constructor.private_ .json-value --.schema-resource --.absolute-location:
+  constructor.private_ .json-pointer .json-value --.schema-resource --.absolute-location:
 
   static build_ o/any -> Schema
       --parent/Schema?
@@ -936,7 +1154,7 @@ class Schema:
     escaped-json-pointer = UriReference.normalize-fragment escaped-json-pointer
     schema-json-pointer-url := schema-resource.uri.with-fragment escaped-json-pointer
 
-    result := Schema.private_ o
+    result := Schema.private_ json-pointer o
         --schema-resource=schema-resource
         --absolute-location=schema-json-pointer-url
 
@@ -964,9 +1182,14 @@ class Schema:
         is-sorted_ = true
       return InstantiatedSchemaObject parent segment this
 
+  uri-reference ref/string -> UriReference:
+    reference := (UriReference.parse ref).normalize
+    return reference.resolve --base=schema-resource.uri
+
 class BuildContext:
   store/Store
   refs/List := []  // Of ActionRef.
+  discriminators/List ::= []  // Of [Discriminator, Schema].
   resource-loader/ResourceLoader
   /**
   Resource-schemas can be loaded through a URL that isn't their actual ID.
@@ -1121,6 +1344,9 @@ class Ref extends Applicator:
       is-dynamic = false
     resolved_ = schema
 
+  target -> Schema?:
+    return resolved_
+
   find-dynamic-schema_ --location/InstantiatedSchema --store/Store -> Schema:
     location.do-schema-resources --reversed: | resource/SchemaResource_ |
       dynamic-target-uri := resource.uri.with-fragment dynamic-fragment
@@ -1157,6 +1383,9 @@ class X-Of extends Applicator:
 
   kind/int
   subschemas/List
+  // An x-of keyword can be disabled it there is an OpenAPI discriminator. In that
+  // case the discriminator does the work of the x-of keyword.
+  is-disabled/bool := false
 
   constructor --.kind .subschemas:
 
@@ -1166,6 +1395,9 @@ class X-Of extends Applicator:
       --instance-pointer/JsonPointer
   :
     result := SubResult location instance-pointer
+    if is-disabled:
+      return result
+
     if kind == ALL-OF:
       all-of-location := location["allOf"]
       for i := 0; i < subschemas.size; i++:
@@ -1892,4 +2124,59 @@ class Format extends Assertion:
     if context.needs-annotations:
       result.annotate "format" format
     // TODO(florian): Implement validation and give a way for users to add their own formats.
+    return result
+
+class Discriminator extends Applicator:
+  property/string
+  mapping/Map?  // From string to UriReference.
+  resolved-mapping/Map? := null  // From string to Schema.
+  kind/int := -1  // An X-Of kind.
+  all-of-hierarchy-parents/Map? := null
+
+  constructor .property .mapping:
+
+  validate o/any -> SubResult
+      --context/ValidationContext
+      --location/InstantiatedSchema
+      --instance-pointer/JsonPointer
+      --required-hierarchy-schema/Schema? = null
+  :
+    result := SubResult location instance-pointer
+    if o is not Map: return result
+
+    if kind == X-Of.ALL-OF and not required-hierarchy-schema:
+      // All-of discriminators are called as part of the validate in
+      // Schemas, where the schema is set.
+      // Otherwise, we skip them.
+      return result
+
+    map := o as Map
+    discriminator-value := map.get property
+    if discriminator-value is not string:
+      result.fail "discriminator" "Discriminator property '$property' not a string."
+      return result
+
+    target-schema/Schema? := resolved-mapping.get discriminator-value
+    if not target-schema:
+      result.fail "discriminator" "Discriminator value '$discriminator-value' not in mapping."
+      return result
+
+    subresult := location["discriminator", target-schema].validate o
+        --context=context
+        --instance-pointer=instance-pointer
+    result.merge subresult
+
+    if required-hierarchy-schema:
+      required-url := required-hierarchy-schema.absolute-location
+      // Check that the required-hierarchy-schema is a parent of the target-schema.
+      current/UriReference? := target-schema.absolute-location
+      while current != required-url:
+        current = (all-of-hierarchy-parents.get current)
+        if not current:
+          result.fail "discriminator" "Discriminator value '$discriminator-value' not expected class"
+          return result
+
+    if kind == X-Of.ONE-OF and not subresult.is-valid:
+      result.fail "discrimator" "Discriminator with 'oneOf' kind failed."
+      return result
     return result

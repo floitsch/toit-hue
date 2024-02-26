@@ -11,12 +11,12 @@ success-counter := 0
 
 class TestLoader extends json-schema.HttpResourceLoader:
   static LOCALHOST-PREFIX ::= "http://localhost:1234/"
-  remote-path/string
+  remote-path/string?
 
   constructor .remote-path:
 
   load url/string:
-    if url.starts-with LOCALHOST-PREFIX:
+    if remote-path and url.starts-with LOCALHOST-PREFIX:
       local-path := url[LOCALHOST-PREFIX.size..]
       content := file.read-content "$remote-path/$local-path"
       return json.decode content
@@ -24,8 +24,8 @@ class TestLoader extends json-schema.HttpResourceLoader:
       return super url
 
 main args:
-  remote-path := args[0]
-  tests := args[1]
+  remote-path/string := args[0]
+  tests/string := args[1]
 
   resource-loader := TestLoader remote-path
 
@@ -76,4 +76,6 @@ run-tests test-json/List --resource-loader/json-schema.ResourceLoader [--print-h
       if test["valid"] != is-valid:
         print-suite.call
         print "    Running test $test["description"]"
-        print "      Test result: $result - $(test["valid"] == result ? "OK" : "FAIL")"
+        print "      Test result: $is-valid - $(test["valid"] == result ? "OK" : "FAIL")"
+        // json-value := result.to-json --structure-kind=json-schema.Result.STRUCTURE-BASIC
+        // print (json.stringify json-value)
