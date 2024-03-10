@@ -1,6 +1,7 @@
 import expect show *
 
 import .openapi
+import .json-schema.json-pointer show JsonPointer
 
 /**
 All examples with section numbers are from https://spec.openapis.org/oas/v3.1.0.
@@ -44,8 +45,10 @@ INFO-MINIMAL ::= {
   "version": "1.0.1"
 }
 
+context := BuildContext
+
 test-info:
-  info := Info.from-json INFO-EXAMPLE
+  info := Info.build INFO-EXAMPLE context JsonPointer
   expect-equals "Sample Pet Store App" info.title
   expect-equals "A pet store manager." info.summary
   expect-equals "This is a sample server for a pet store." info.description
@@ -61,7 +64,7 @@ test-info:
   json := info.to-json
   expect-structural-equals INFO-EXAMPLE json
 
-  info = Info.from-json INFO-MINIMAL
+  info = Info.build INFO-MINIMAL context JsonPointer
   expect-equals "Sample Pet Store App" info.title
   expect-equals "1.0.1" info.version
   expect_null info.summary
@@ -84,7 +87,7 @@ CONTACT-EXAMPLE ::= {
 CONTACT-MINIMAL ::= {:}
 
 test-contact:
-  contact := Contact.from-json CONTACT-EXAMPLE
+  contact := Contact.build CONTACT-EXAMPLE context JsonPointer
   expect-equals "API Support" contact.name
   expect-equals "https://www.example.com/support" contact.url
   expect-equals "support@example.com" contact.email
@@ -93,7 +96,7 @@ test-contact:
   expect-structural-equals CONTACT-EXAMPLE json
 
 
-  contact = Contact.from-json CONTACT-MINIMAL
+  contact = Contact.build CONTACT-MINIMAL context JsonPointer
   expect_null contact.name
   expect_null contact.url
   expect_null contact.email
@@ -109,7 +112,7 @@ LICENSE-EXAMPLE ::= {
 }
 
 test-license:
-  license := License.from-json LICENSE-EXAMPLE
+  license := License.build LICENSE-EXAMPLE context JsonPointer
   expect-equals "Apache 2.0" license.name
   expect-equals "Apache-2.0" license.identifier
 
@@ -162,19 +165,19 @@ SERVER-VARIABLE-EXAMPLE ::= {
 }
 
 test-server:
-  server := Server.from-json SERVER-EXAMPLE
+  server := Server.build SERVER-EXAMPLE context JsonPointer
   expect-equals "https://development.gigantic-server.com/v1" server.url
   expect-equals "Development server" server.description
 
   json := server.to-json
   expect-structural-equals SERVER-EXAMPLE json
 
-  servers := SERVER-LIST-EXAMPLE.map: Server.from-json it
+  servers := SERVER-LIST-EXAMPLE.map: Server.build it context JsonPointer
   expect-equals 3 servers.size
   json-list := servers.map: it.to-json
   expect-structural-equals SERVER-LIST-EXAMPLE json-list
 
-  server = Server.from-json SERVER-VARIABLE-EXAMPLE
+  server = Server.build SERVER-VARIABLE-EXAMPLE context JsonPointer
   expect-equals "https://{username}.gigantic-server.com:{port}/{basePath}" server.url
   expect-equals "The production API server" server.description
   expect-equals 3 server.variables.size
@@ -449,20 +452,20 @@ EXTERNAL-DOCUMENTATION-EXAMPLE ::= {
 }
 
 test-external-documenation:
-  documentation := ExternalDocumentation.from-json EXTERNAL-DOCUMENTATION-EXAMPLE
+  documentation := ExternalDocumentation.build EXTERNAL-DOCUMENTATION-EXAMPLE context JsonPointer
   expect-equals "Find more info here" documentation.description
   expect-equals "https://example.com" documentation.url
 
   json := documentation.to-json
   expect-structural-equals EXTERNAL-DOCUMENTATION-EXAMPLE json
 
-  expect-throw "key 'url' not found": documentation = ExternalDocumentation.from-json {:}
-  expect-throw "key 'url' not found": documentation = ExternalDocumentation.from-json {
+  expect-throw "key 'url' not found": documentation = ExternalDocumentation.build {:} context JsonPointer
+  expect-throw "key 'url' not found": documentation = ExternalDocumentation.build {
     "description": "Find more info here",
-  }
-  documentation = ExternalDocumentation.from-json {
+  }  context JsonPointer
+  documentation = ExternalDocumentation.build {
     "url": "https://example.com"
-  }
+  } context JsonPointer
   expect_null documentation.description
   expect-equals "https://example.com" documentation.url
 
@@ -596,7 +599,7 @@ REFERENCE-EMBEDDED-SCHEMA-EXAMPLE ::= {
 }
 
 test-reference:
-  reference := Reference.from-json REFERENCE-OBJECT-EXAMPLE
+  reference := Reference.build REFERENCE-OBJECT-EXAMPLE context JsonPointer
   expect-equals "#/components/schemas/Pet" reference.ref
   expect-null reference.description
   expect-null reference.summary
@@ -604,7 +607,7 @@ test-reference:
   json := reference.to-json
   expect-structural-equals REFERENCE-OBJECT-EXAMPLE json
 
-  reference = Reference.from-json REFERENCE-SCHEMA-DOCUMENT-EXAMPLE
+  reference = Reference.build REFERENCE-SCHEMA-DOCUMENT-EXAMPLE context JsonPointer
   expect-equals "Pet.json" reference.ref
   expect-null reference.description
   expect-null reference.summary
@@ -612,7 +615,7 @@ test-reference:
   json = reference.to-json
   expect-structural-equals REFERENCE-SCHEMA-DOCUMENT-EXAMPLE json
 
-  reference = Reference.from-json REFERENCE-EMBEDDED-SCHEMA-EXAMPLE
+  reference = Reference.build REFERENCE-EMBEDDED-SCHEMA-EXAMPLE context JsonPointer
   expect-equals "definitions.json#/Pet" reference.ref
   expect-null reference.description
   expect-null reference.summary
