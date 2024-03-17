@@ -35,6 +35,8 @@ class Extensionable_:
 
 class BuildContext:
   json-schema-dialect/string? := null
+  json-schema-context := json-schema.BuildContext
+      --default-vocabulary-uri=json-schema.OPENAPI-3-1-URI
 
 /** The root object of the OpenAPI document. */
 // https://spec.openapis.org/oas/v3.1.0#openapi-object
@@ -143,7 +145,7 @@ class OpenApi extends Extensionable_:
     pointer := JsonPointer
     context := BuildContext
     context.json-schema-dialect = schema-dialect
-    return OpenApi
+    result := OpenApi
       --openapi=o["openapi"]
       --info=Info.build o["info"] context pointer["info"]
       --json-schema-dialect=o.get schema-dialect
@@ -155,6 +157,8 @@ class OpenApi extends Extensionable_:
       --tags=o.get "tags"
       --external-docs=o.get "externalDocs"
       --extensions=Extensionable_.extract-extensions o
+    json-schema.resolve --context=context.json-schema-context
+    return result
 
   to-json -> Map:
     result := {
@@ -1442,8 +1446,18 @@ class Reference:
     return result
 
 class Schema:
-  static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
-  to-json -> Map: throw "UNIMPLEMENTED"
+  original-json_/Map
+  schema/json-schema.JsonSchema
+
+  constructor --original-json/Map --.schema:
+    this.original-json_ = original-json
+
+  static build o/Map context/BuildContext pointer/JsonPointer:
+    schema := json-schema.parse o --context=context.json-schema-context
+    return Schema --original-json=o --schema=schema
+
+  to-json -> Map:
+    return original-json_
 
 class Encoding:
   static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"

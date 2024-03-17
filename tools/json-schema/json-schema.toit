@@ -12,17 +12,30 @@ import .uri
 import .json-pointer
 import .regex as regex
 
+JSON-SCHEMA-2020-12-URI ::= "https://json-schema.org/draft/2020-12/schema"
+OPENAPI-3_1-URI ::= "https://spec.openapis.org/oas/3.1/dialect/base"
+
 // Cached entries for dialects, so we don't need to download the Schema.
 DIALECTS ::= {
-  "https://json-schema.org/draft/2020-12/schema": {
-    "https://json-schema.org/draft/2020-12/vocab/core": true,
-    "https://json-schema.org/draft/2020-12/vocab/applicator": true,
-    "https://json-schema.org/draft/2020-12/vocab/unevaluated": true,
-    "https://json-schema.org/draft/2020-12/vocab/validation": true,
-    "https://json-schema.org/draft/2020-12/vocab/meta-data": true,
-    "https://json-schema.org/draft/2020-12/vocab/format-annotation": true,
-    "https://json-schema.org/draft/2020-12/vocab/content": true,
-  }
+  JSON-SCHEMA-2020-12-URI: {
+    VocabularyCore.URI: true,
+    VocabularyApplicator.URI: true,
+    VocabularyUnevaluated.URI: true,
+    VocabularyValidation.URI: true,
+    VocabularyMetaData.URI: true,
+    VocabularyFormatAnnotation.URI: true,
+    VocabularyContent.URI: true,
+  },
+  OPENAPI-3_1-URI: {
+    VocabularyCore.URI: true,
+    VocabularyApplicator.URI: true,
+    VocabularyUnevaluated.URI: true,
+    VocabularyValidation.URI: true,
+    VocabularyMetaData.URI: true,
+    VocabularyFormatAnnotation.URI: true,
+    VocabularyContent.URI: true,
+    VocabularyOpenApi.URI: true,
+  },
 }
 
 KNOWN-VOCABULARIES ::= {
@@ -625,16 +638,6 @@ class VocabularyOpenApi implements Vocabulary:
       discriminator.kind = x-of ? x-of.kind : X-Of.ALL-OF
       discriminator.resolved-mapping = resolved-mapping
 
-DEFAULT-VOCABULARIES ::= {
-  VocabularyCore.URI: VocabularyCore,
-  VocabularyApplicator.URI: VocabularyApplicator,
-  VocabularyValidation.URI: VocabularyValidation,
-  VocabularyUnevaluated.URI: VocabularyUnevaluated,
-  VocabularyMetaData.URI: VocabularyMetaData,
-  VocabularyFormatAnnotation.URI: VocabularyFormatAnnotation,
-  VocabularyContent.URI: VocabularyContent,
-}
-
 interface ResourceLoader:
   load url/string -> any
 
@@ -866,11 +869,43 @@ class Detail:
       result["annotation"] = json-value
     return result
 
-build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
-  store := Store
-  context := BuildContext --store=store --resource-loader=resource-loader
-  root-schema := Schema.build_ o --context=context --json-pointer=JsonPointer --parent=null
+/**
+Builds the $JsonSchema for the given JSON value $o.
 
+Conceptually this consists of:
+  - Parsing the JSON value into a schema.
+  - Resolving all references.
+
+Users may want to use the $parse and $resolve methods directly, if they want to
+  control the process more closely. For example, the OpenAPI specification has
+  schemas intermingled with other data, in which case $parse needs to be called
+  multiple times with different json-pointers.
+*/
+build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
+  context := BuildContext --resource-loader=resource-loader
+  schema := parse o --resource-loader=resource-loader --context=context
+  resolve --context=context
+  return schema
+
+parse o/any -> JsonSchema
+    --context/BuildContext
+    --resource-loader/ResourceLoader=HttpResourceLoader
+    --json-pointer/JsonPointer=JsonPointer
+  :
+  root-schema := Schema.build_ o
+      --context=context
+      --json-pointer=json-pointer
+      --parent=null
+  return JsonSchema root-schema context.store
+
+/**
+Resolves all references that were collected during the parsing of the schema.
+
+The given $context contains the references and the store with all the schemas.
+*/
+resolve --context/BuildContext:
+  store := context.store
+  resource-loader := context.resource-loader
   // Resolve all references.
   while not context.refs.is-empty:
     pending := context.refs
@@ -907,8 +942,6 @@ build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
 
   if not context.discriminators.is-empty:
     VocabularyOpenApi.resolve-discriminators --context=context
-
-  return JsonSchema root-schema store
 
 class JsonSchema:
   schema_/Schema
@@ -974,11 +1007,9 @@ class SchemaResource_:
     // Unless this is a schema with a "$schema" property that overrides the
     // dialect, these are the vocabularies we want to use:
     //  Inherit from parent if there is one, otherwise use the default ones.
-    vocabularies = parent ? parent.schema-resource.vocabularies : DEFAULT-VOCABULARIES
-    if o is not Map:
-
-    if o is Map and o.contains "\$schema":
-      meta-uri := o.get "\$schema"
+    specified-schema := o is Map and o.get "\$schema"
+    if specified-schema or not parent:
+      meta-uri := specified-schema or build-context.default-vocabulary-uri
       dialect := DIALECTS.get meta-uri
       if not dialect:
         meta-schema := build-context.resource-loader.load meta-uri
@@ -991,6 +1022,8 @@ class SchemaResource_:
           throw "Unknown vocabulary: $vocabulary-uri"
         if vocabulary:
           vocabularies[vocabulary-uri] = vocabulary
+    else:
+      vocabularies = parent.schema-resource.vocabularies
 
     handled-keywords = {}
     vocabularies.do: | _ vocabulary/Vocabulary |
@@ -1187,7 +1220,7 @@ class Schema:
     return reference.resolve --base=schema-resource.uri
 
 class BuildContext:
-  store/Store
+  store/Store ::= Store
   refs/List := []  // Of ActionRef.
   discriminators/List ::= []  // Of [Discriminator, Schema].
   resource-loader/ResourceLoader
@@ -1196,8 +1229,11 @@ class BuildContext:
   For example, this can happen when a loaded schema defines its own "$id" property.
   */
   resource-uri-id-mapping := {:}  // From UriReference to UriReference.
+  default-vocabulary-uri/string
 
-  constructor --.store --.resource-loader:
+  constructor
+      --.resource-loader=HttpResourceLoader
+      --.default-vocabulary-uri=JSON-SCHEMA-2020-12-URI:
 
 class Store:
   entries_/Map ::= {:}
