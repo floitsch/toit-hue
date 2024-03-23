@@ -692,6 +692,18 @@ class PathItem extends Extensionable_:
     super --extensions=extensions
 
   static build o/Map context/BuildContext pointer/JsonPointer -> PathItem:
+    parameters/List? := null
+    o.get "parameters" --if-present=: | json-parameters/List |
+        parameters-pointer := pointer["parameters"]
+        parameters = []
+        json-parameters.size.repeat: | i |
+          parameter-pointer := parameters-pointer[i]
+          entry := json-parameters[i]
+          parameter := entry.get "\$ref"
+              --if-present=: Reference.build entry context parameter-pointer
+              --if-absent=: Parameter.build entry context parameter-pointer
+          parameters.add parameter
+
     return PathItem
       --ref=o.get "\$ref"
       --summary=o.get "summary"
@@ -705,7 +717,7 @@ class PathItem extends Extensionable_:
       --patch=o.get "patch" --if-present=: Operation.build it context pointer["patch"]
       --trace=o.get "trace" --if-present=: Operation.build it context pointer["trace"]
       --servers=o.get "servers"
-      --parameters=o.get "parameters"
+      --parameters=parameters
       --extensions=Extensionable_.extract-extensions o
 
   to-json -> Map:
@@ -1394,6 +1406,301 @@ class MediaType extends Extensionable_:
     return result
 
 /**
+A single encoding definition applied to a single schema property.
+*/
+class Encoding extends Extensionable_:
+  /**
+  The Content-Type for encoding a specific property.
+
+  The default value depends on the property type:
+  - for `object-application/json` the default is defined based on the inner type.
+  - for `array` the default is defined based on the inner type.
+  - for all other types the default is `application/octet-stream`.
+
+  The value can be a specific media type (e.g. `application/json`),
+    a wildcard media type (e.g. `image/\*`), or a comma-separated list of
+    the two types.
+  */
+  content-type/string?
+
+  /**
+  A map allowing additional information to be provided as headers, for example
+    `Content-Disposition`. `Content-Type` is described separately and is
+    ignored in this section. This property is ignored if the request
+    body media type is not a `multipart`.
+
+  The values are either of type $Header or $Reference.
+  */
+  headers/Map?
+
+  /**
+  Describes how a specific property value will be serialized depending on
+    its type.
+
+  See $Parameter for details on the style property.
+
+  The behavior follows the same values as `query` parameters, including default values.
+  This property is ignored if the request body media type is not
+    `application/x-www-form-urlencoded` or `multipart/form-data`.
+  If a value is explicitly defined, then the value of $content-type (implicit or
+    explicit) is ignored.
+  */
+  style/string?
+
+  /**
+  Whether property values of type `array` or `object` should be exploded.
+
+  When this is set to true, property values of type `array` or `object`
+    generate separate parameters for each value of the array, or key-value
+    pair of the map. For other types of properties this property has no effect.
+
+  When $style is `form`, the default value is true. For all other styles,
+    the default value is false.
+
+  This property is ignored if the request body media type is not
+    `application/x-www-form-urlencoded` or `multipart/form-data`.
+
+  If a value is explicitly defined, then the value of $content-type (implicit
+    or explicit) is ignored.
+  */
+  explode/bool?
+
+  /**
+  Whether parameter values allow reserved characters.
+
+  Determines whether the parameter value allows reserved characters, as defined
+    by [RFC3986](https://datatracker.ietf.org/doc/html/rfc3986#section-2.2)
+    `:/?#[]@!$&'()*+,;=` to be included without percent-encoding.
+
+  The default value is false.
+
+  This property is ignored if the request body media type is not
+    `application/x-www-form-urlencoded` or `multipart/form-data`.
+
+  If a value is explicitly defined, then the value of $content-type (implicit
+    or explicit) is ignored.
+  */
+  allow-reserved/bool?
+
+  constructor
+      --.content-type=null
+      --.headers=null
+      --.style=null
+      --.explode=null
+      --.allow-reserved=null
+      --extensions/Map?=null:
+    super --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> Encoding:
+    headers := o.get "headers" --if-present=: | json-headers/Map |
+        headers-pointer := pointer["headers"]
+        json-headers.map: | key value |
+          value.get "\$ref"
+              --if-present=: Reference.build value context headers-pointer[key]
+              --if-absent=: Header.build value context headers-pointer[key]
+    return Encoding
+      --content-type=o.get "contentType"
+      --headers=headers
+      --style=o.get "style"
+      --explode=o.get "explode"
+      --allow-reserved=o.get "allowReserved"
+      --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    result := {:}
+    if content-type: result["contentType"] = content-type
+    if headers: result["headers"] = headers.map: | _ value | value.to-json
+    if style: result["style"] = style
+    if explode: result["explode"] = explode
+    if allow-reserved: result["allowReserved"] = allow-reserved
+    add-extensions-to-json_ result
+    return result
+
+/**
+A container for the expected responses of an operation.
+Maps a HTTP response code to the expected response.
+
+The documentation is not necessarily expected to cover all possible HTTP
+  response codes because they may not be known in advance. However, documentation
+  is expected to cover a successful operation response and any known errors.
+
+The $default field may be used as a default response object for all HTTP codes
+  that are not covered individually by this object.
+
+An instance of this class must contain at least one response code, and if
+  only one response code is provided, it should be the response for a
+  successful operation call.
+*/
+class Responses extends Extensionable_:
+  /**
+  The documentation of responses other than the ones declared for specific
+    HTTP response codes.
+
+  It can be used to cover undeclared responses.
+  */
+  default/any  // Either a Response or a Reference.
+
+  /**
+  A map from status code (string) to the expected response.
+
+  This map may contain entries for ranges of response codes. In that case,
+    the key is of the form `2XX` where the `X` is a wildcard. The following
+    ranges are allowed: `1XX`, `2XX`, `3XX`, `4XX`, and `5XX`.
+  If a response is defined using an explicit code, then the explicit code
+    takes precedence over the range definition for that code.
+  */
+  responses/Map  // From string to Response or Reference.
+
+  constructor --.default=null --.responses={:} --extensions/Map?=null:
+    if not default and responses.size == 0:
+      throw "Responses must contain at least one response"
+    super --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> Responses:
+    default := o.get "default" --if-present=: | response-json/Map |
+      default-pointer := pointer["default"]
+      response-json.get "\$ref"
+          --if-present=: Reference.build response-json context default-pointer
+          --if-absent=: Response.build response-json context default-pointer
+
+    responses := {:}
+    o.do: | key/string value/any |
+      // The key must either be a status code (3 digits) or a range (1 digit
+      // followed by 2 'X' characters).
+      if key.size == 3 and
+          '1' <= key[0] <= '5' and
+          ((key[1] == 'X' and key[2] == 'X') or
+            ('0' <= key[1] <= '9' and '0' <= key[2] <= '9')):
+        code := key
+        response-json := value
+        response-pointer := pointer[code]
+        response := response-json.get "\$ref"
+            --if-present=: Reference.build response-json context response-pointer
+            --if-absent=: Response.build response-json context response-pointer
+        responses[code] = response
+
+    return Responses
+        --default=default
+        --responses=responses
+        --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    result := {:}
+    if default: result["default"] = default.to-json
+    responses.do: | key value |
+      result[key] = value.to-json
+    add-extensions-to-json_ result
+    return result
+
+/**
+A single response from an API Operation, including design-time, static
+  links to operations based on the response.
+*/
+class Response extends Extensionable_:
+  /**
+  A short description of the response.
+  CommonMark syntax may be used for rich text representation.
+  */
+  description/string
+
+  /**
+  The list of headers that are sent with the response.
+
+  Maps a header name to its definition.
+  Following [RFC7230](https://datatracker.ietf.org/doc/html/rfc7230#section-3.2),
+    header names are case-insensitive.
+
+  If a response header is defined with the name "Content-Type", it is ignored.
+  */
+  headers/Map?  // From string to Header or Reference.
+
+  /**
+  A map containing descriptions of potential response payloads.
+  The key is a media type or media type range and the value describes it.
+  For responses that match multiple keys, only the most specific key is
+    applicable. For example, `text/plain` overrides `text/\*`.
+
+  For media type range see https://tools.ietf.org/html/rfc7231#appendix-D.
+  */
+  content/Map?  // From string to MediaType.
+
+  /**
+  A map of operations links that can be followed from the response.
+  The key of the map is a short name for the link, following the naming
+    constraints of the names for Component Objects.
+  */
+  links/Map?  // From string to Link or Reference.
+
+  constructor --.description=null --.headers=null --.content --.links=null --extensions/Map?=null:
+    super --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> Response:
+    headers := o.get "headers" --if-present=: | json-headers/Map |
+        headers-pointer := pointer["headers"]
+        json-headers.map: | key value |
+          value.get "\$ref"
+              --if-present=: Reference.build value context headers-pointer[key]
+              --if-absent=: Header.build value context headers-pointer[key]
+    content := o.get "content" --if-present=: | json-content/Map |
+        content-pointer := pointer["content"]
+        json-content.map: | key value |
+          MediaType.build value context content-pointer[key]
+    links := o.get "links" --if-present=: | json-links/Map |
+        links-pointer := pointer["links"]
+        json-links.map: | key value |
+          value.get "\$ref"
+              --if-present=: Reference.build value context links-pointer[key]
+              --if-absent=: Link.build value context links-pointer[key]
+    return Response
+      --description=o["description"]
+      --headers=headers
+      --content=content
+      --links=links
+      --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    result := {
+      "description": description,
+    }
+    if headers: result["headers"] = headers.map: | _ value | value.to-json
+    if content: result["content"] = content.map: | _ value | value.to-json
+    if links: result["links"] = links.map: | _ value | value.to-json
+    add-extensions-to-json_ result
+    return result
+
+/**
+A map of possible out-of band callbacks related to the parent operation.
+*/
+class Callback extends Extensionable_:
+  /**
+  A map of possible out-of band callbacks related to the parent operation.
+
+  Each value in the map is a $PathItem (or $Reference) that describes a
+    set of requests that may be initiated by the API provider and the
+    expected responses.
+  The key value used to identify the path-item object is an expression,
+    evaluated at runtime, that identifies a URL to use for the callback
+    operation.
+
+  See $OpenApi.webhooks to describe incoming requests from the API provider
+    independent from another API call.
+
+  # Key Expression
+  Keys must be [runtime expressions](https://spec.openapis.org/oas/v3.1.0#runtime-expressions) which allow defining values based on information that will only be available within the HTTP message in an actual API call.
+  */
+  TODO: florian: make Runtime expressions actual objects.
+  callbacks/Map  // From string to PathItem or Reference.
+
+  constructor --.callbacks --extensions/Map?=null:
+    super --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer:
+
+    throw "UNIMPLEMENTED"
+  to-json -> Map: throw "UNIMPLEMENTED"
+
+
+/**
 A simple object to allow referencing other components in the OpenAPI
   document; internally and externally.
 
@@ -1452,20 +1759,12 @@ class Schema:
   constructor --original-json/Map --.schema:
     this.original-json_ = original-json
 
-  static build o/Map context/BuildContext pointer/JsonPointer:
+  static build o/Map context/BuildContext pointer/JsonPointer -> Schema:
     schema := json-schema.parse o --context=context.json-schema-context
     return Schema --original-json=o --schema=schema
 
   to-json -> Map:
     return original-json_
-
-class Encoding:
-  static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
-  to-json -> Map: throw "UNIMPLEMENTED"
-
-class Response:
-  static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
-  to-json -> Map: throw "UNIMPLEMENTED"
 
 class Example:
   static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
@@ -1483,14 +1782,6 @@ class Link:
   static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
   to-json -> Map: throw "UNIMPLEMENTED"
 
-class Callback:
-  static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
-  to-json -> Map: throw "UNIMPLEMENTED"
-
 class SecurityRequirement:
-  static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
-  to-json -> Map: throw "UNIMPLEMENTED"
-
-class Responses:
   static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
   to-json -> Map: throw "UNIMPLEMENTED"

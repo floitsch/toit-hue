@@ -20,7 +20,11 @@ main:
   test-parameter
   test-request-body
   test-media-type
+  test-encoding
+  test-responses
+  test-response
   test-reference
+  test-schema
 
 // Example from 4.8.2.2.
 INFO-EXAMPLE ::= {
@@ -53,9 +57,10 @@ test-info:
   expect-equals "A pet store manager." info.summary
   expect-equals "This is a sample server for a pet store." info.description
   expect-equals "https://example.com/terms/" info.terms-of-service
-  expect-equals "API Support" info.contact.name
-  expect-equals "https://www.example.com/support" info.contact.url
-  expect-equals "support@example.com" info.contact.email
+  contact/Contact := info.contact
+  expect-equals "API Support" contact.name
+  expect-equals "https://www.example.com/support" contact.url
+  expect-equals "support@example.com" contact.email
   expect-equals "Apache 2.0" info.license.name
   expect-equals "https://www.apache.org/licenses/LICENSE-2.0.html" info.license.url
   expect-equals "1.0.1" info.version
@@ -327,7 +332,19 @@ PATHS-EXAMPLE ::= {
 }
 
 test-paths:
-  print "TODO: test paths"
+  paths := Paths.build PATHS-EXAMPLE context JsonPointer
+  expect-equals 1 paths.paths.size
+  expect-equals "/pets" paths.paths.keys.first
+  path-item/PathItem := paths.paths["/pets"]
+  get/Operation := path-item.get
+  expect-equals "Returns all pets from the system that the user has access to" get.description
+  expect-equals 1 get.responses.responses.size
+  expect-equals "A list of pets." get.responses.responses["200"].description
+  expect-equals 1 get.responses.responses["200"].content.size
+  expect-equals "application/json" get.responses.responses["200"].content.keys.first
+
+  json := paths.to-json
+  expect-structural-equals PATHS-EXAMPLE json
 
 PATH-ITEM-EXAMPLE ::= {
   "get": {
@@ -378,7 +395,30 @@ PATH-ITEM-EXAMPLE ::= {
 }
 
 test-path-item:
-  print "TODO: test path item"
+  path-item := PathItem.build PATH-ITEM-EXAMPLE context JsonPointer
+  get := path-item.get
+  expect-equals "Returns pets based on ID" get.description
+  expect-equals "Find pets by ID" get.summary
+  expect-equals "getPetsById" get.operation-id
+  expect-equals 1 get.responses.responses.size
+  expect-equals "pet response" get.responses.responses["200"].description
+  expect-equals 1 get.responses.responses["200"].content.size
+  expect-equals "*/*" get.responses.responses["200"].content.keys.first
+  expect-not-null get.responses.default
+  expect-equals "error payload" get.responses.default.description
+  expect-equals 1 get.responses.default.content.size
+  expect-equals "text/html" get.responses.default.content.keys.first
+  parameters := path-item.parameters
+  expect-equals 1 parameters.size
+  parameter := parameters.first
+  expect-equals "id" parameter.name
+  expect-equals "path" parameter.in
+  expect-equals "ID of pet to use" parameter.description
+  expect parameter.required
+  expect-equals "simple" parameter.style
+
+  json := path-item.to-json
+  expect-structural-equals PATH-ITEM-EXAMPLE json
 
 OPERATION-EXAMPLE ::= {
   "tags": [
@@ -445,6 +485,38 @@ OPERATION-EXAMPLE ::= {
 
 test-operation:
   print "TODO: test operation"
+  /*
+  operation := Operation.build OPERATION-EXAMPLE context JsonPointer
+  expect-equals 1 operation.tags.size
+  expect-equals "pet" operation.tags.first
+  expect-equals "Updates a pet in the store with form data" operation.summary
+  expect-equals "updatePetWithForm" operation.operation-id
+  expect-equals 1 operation.parameters.size
+  parameter/Parameter := operation.parameters.first
+  expect-equals "petId" parameter.name
+  expect-equals "path" parameter.in
+  expect-equals "ID of pet that needs to be updated" parameter.description
+  expect parameter.required
+  body/RequestBody := operation.request-body
+  expect-equals 1 body.content.size
+  expect-equals "application/x-www-form-urlencoded" body.content.keys.first
+  responses := operation.responses
+  expect-equals 2 responses.responses.size
+  response-200 := responses.responses["200"]
+  expect-equals "Pet updated." response-200.description
+  expect-equals 2 response-200.content.size
+  expect-equals "application/json" response-200.content.keys.first
+  expect-equals "application/xml" response-200.content.keys[1]
+  response-405 := responses.responses["405"]
+  expect-equals "Method Not Allowed" response-405.description
+  expect-equals 2 response-405.content.size
+  expect-equals "application/json" response-405.content.keys.first
+  expect-equals "application/xml" response-405.content.keys[1]
+  expect-equals 1 operation.security.size
+  security := operation.security.first
+  expect-equals 2 security["petstore_auth"].size
+  */
+
 
 EXTERNAL-DOCUMENTATION-EXAMPLE ::= {
   "description": "Find more info here",
@@ -485,7 +557,15 @@ PARAMETER-EXAMPLES ::= {
 }
 
 test-parameter:
-  print "TODO: test parameter"
+  parameter := Parameter.build PARAMETER-EXAMPLES context JsonPointer
+  expect-equals "token" parameter.name
+  expect-equals "header" parameter.in
+  expect-equals "token to be passed as a header" parameter.description
+  expect parameter.required
+  expect-equals "simple" parameter.style
+
+  json := parameter.to-json
+  expect-structural-equals PARAMETER-EXAMPLES json
 
 REQUEST-BODY-EXAMPLE ::= {
   "description": "user to add to the system",
@@ -547,9 +627,19 @@ REQUEST-BODY2-EXAMPLE ::= {
 }
 
 test-request-body:
-  print "TODO: test request"
+  print "TODO: test request body"
+  /*
+  request-body := RequestBody.build REQUEST-BODY-EXAMPLE context JsonPointer
+  expect-equals "user to add to the system" request-body.description
+  content := request-body.content
+  expect-equals 4 content.size
+  expect-equals "application/json" content.keys.first
+  expect-equals "application/xml" content.keys[1]
+  expect-equals "text/plain" content.keys[2]
+  */
+  //expect-equals "*/*" content.keys[3]
 
-MEDIA-TYPE-EXAMPLES ::= {
+MEDIA-TYPE-EXAMPLE ::= {
   "application/json": {
     "schema": {
         "\$ref": "#/components/schemas/Pet"
@@ -585,6 +675,156 @@ MEDIA-TYPE-EXAMPLES ::= {
 
 test-media-type:
   print "TODO: test media type"
+
+ENCODING-EXAMPLE1 ::= {
+  "contentType": "application/xml; charset=utf-8"
+}
+
+ENCODING-EXAMPLE2 ::= {
+  "contentType": "image/png, image/jpeg",
+  "headers": {
+    "X-Rate-Limit-Limit": {
+      "description": "The number of allowed requests in the current period",
+      "schema": {
+        "type": "integer"
+      }
+    }
+  }
+}
+
+test-encoding:
+  encoding := Encoding.build ENCODING-EXAMPLE1 context JsonPointer
+  expect-equals "application/xml; charset=utf-8" encoding.content-type
+  expect-null encoding.headers
+
+  json := encoding.to-json
+  expect-structural-equals ENCODING-EXAMPLE1 json
+
+  print "TODO: test encoding part 2"
+  // encoding = Encoding.build ENCODING-EXAMPLE2 context JsonPointer
+  // expect-equals "image/png, image/jpeg" encoding.content-type
+  // expect-equals 1 encoding.headers.size
+
+  // json = encoding.to-json
+  // expect-structural-equals ENCODING-EXAMPLE2 json
+
+RESPONSES-EXAMPLE ::= {
+  "200": {
+    "description": "a pet to be returned",
+    "content": {
+      "application/json": {
+        "schema": {
+          "\$ref": "#/components/schemas/Pet"
+        }
+      }
+    }
+  },
+  "default": {
+    "description": "unexpected error",
+    "content": {
+      "application/json": {
+        "schema": {
+          "\$ref": "#/components/schemas/Error"
+        }
+      }
+    }
+  }
+}
+
+test-responses:
+  responses := Responses.build RESPONSES-EXAMPLE context JsonPointer
+  expect-equals 1 responses.responses.size
+  response-200 := responses.responses["200"]
+  expect-equals "a pet to be returned" response-200.description
+  expect-equals 1 response-200.content.size
+  expect-equals "application/json" response-200.content.keys.first
+  response-default := responses.default
+  expect-equals "unexpected error" response-default.description
+  expect-equals 1 response-default.content.size
+  expect-equals "application/json" response-default.content.keys.first
+
+  json := responses.to-json
+  expect-structural-equals RESPONSES-EXAMPLE json
+
+RESPONSE-EXAMPLE1 ::= {
+  "description": "A complex object array response",
+  "content": {
+    "application/json": {
+      "schema": {
+        "type": "array",
+        "items": {
+          "\$ref": "#/components/schemas/VeryComplexType"
+        }
+      }
+    }
+  }
+}
+
+RESPONSE-EXAMPLE2 ::= {
+  "description": "A simple string response",
+  "content": {
+    "text/plain": {
+      "schema": {
+        "type": "string"
+      }
+    }
+  }
+}
+
+RESPONSE-EXAMPLE3 ::= {
+  "description": "A simple string response",
+  "content": {
+    "text/plain": {
+      "schema": {
+        "type": "string",
+        "example": "whoa!"
+      }
+    }
+  },
+  "headers": {
+    "X-Rate-Limit-Limit": {
+      "description": "The number of allowed requests in the current period",
+      "schema": {
+        "type": "integer"
+      }
+    },
+    "X-Rate-Limit-Remaining": {
+      "description": "The number of remaining requests in the current period",
+      "schema": {
+        "type": "integer"
+      }
+    },
+    "X-Rate-Limit-Reset": {
+      "description": "The number of seconds left in the current period",
+      "schema": {
+        "type": "integer"
+      }
+    }
+  }
+}
+
+RESPONSE-EXAMPLE4 ::= {
+  "description": "object created"
+}
+
+test-response:
+  response := Response.build RESPONSE-EXAMPLE1 context JsonPointer
+  expect-equals "A complex object array response" response.description
+  expect-equals 1 response.content.size
+  expect-equals "application/json" response.content.keys.first
+
+  json := response.to-json
+  expect-structural-equals RESPONSE-EXAMPLE1 json
+
+  response = Response.build RESPONSE-EXAMPLE2 context JsonPointer
+  expect-equals "A simple string response" response.description
+  expect-equals 1 response.content.size
+  expect-equals "text/plain" response.content.keys.first
+
+  json = response.to-json
+  expect-structural-equals RESPONSE-EXAMPLE2 json
+
+  print "TODO: test response part 3"
 
 REFERENCE-OBJECT-EXAMPLE ::= {
   "\$ref": "#/components/schemas/Pet"
@@ -622,3 +862,34 @@ test-reference:
 
   json = reference.to-json
   expect-structural-equals REFERENCE-EMBEDDED-SCHEMA-EXAMPLE json
+
+SCHEMA-PRIMITIVE-EXAMPLE ::= {
+  "type": "string",
+  "format": "email"
+}
+
+SCHEMA-MODEL-EXAMPLE ::= {
+  "type": "object",
+  "required": [
+    "name",
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+    },
+    "address": {
+      "\$ref": "#/components/schemas/Address",
+    },
+    "age": {
+      "type": "integer",
+      "format": "int32",
+      "minimum": 0,
+    },
+  },
+}
+
+test-schema:
+  // Just make sure that the schemas can be parsed.
+  schema := Schema.build SCHEMA-PRIMITIVE-EXAMPLE context JsonPointer
+  schema = Schema.build SCHEMA-MODEL-EXAMPLE context JsonPointer
+
