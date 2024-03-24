@@ -23,6 +23,8 @@ main:
   test-encoding
   test-responses
   test-response
+  test-callback
+  test-example
   test-reference
   test-schema
 
@@ -825,6 +827,169 @@ test-response:
   expect-structural-equals RESPONSE-EXAMPLE2 json
 
   print "TODO: test response part 3"
+
+CALLBACK-EXAMPLE ::= {
+  "{\$request.query.queryUrl}": {
+    "post": {
+      "requestBody": {
+        "description": "callback payload",
+        "content": {
+          "application/json": {
+            "schema": {
+              "\$ref": "#/components/schemas/SomePayload"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "callback successfully processed"
+        }
+      }
+    }
+  }
+}
+
+test-callback:
+  callback := Callback.build CALLBACK-EXAMPLE context JsonPointer
+  expect-equals 1 callback.callbacks.size
+  runtime-expression := callback.callbacks.keys.first
+  expect-equals "{\$request.query.queryUrl}" runtime-expression.expression
+  post := callback.callbacks[runtime-expression].post
+  request-body := post.request-body
+  expect-not-null request-body
+  expect-equals "callback payload" request-body.description
+  expect-equals 1 request-body.content.size
+  expect-equals "application/json" request-body.content.keys.first
+  responses := post.responses
+  expect-equals 1 responses.responses.size
+  response-200 := responses.responses["200"]
+  expect-equals "callback successfully processed" response-200.description
+
+EXAMPLE-REQUEST-BODY-TEST ::= {
+  "content": {
+    "application/json": {
+      "schema": {
+        "\$ref": "#/components/schemas/Address"
+      },
+      "examples": {
+        "foo": {
+          "summary": "A foo example",
+          "value": {
+            "foo": "bar"
+          }
+        },
+        "bar": {
+          "summary": "A bar example",
+          "value": {
+            "bar": "baz"
+          }
+        }
+      }
+    },
+    "application/xml": {
+      "examples": {
+        "xmlExample": {
+          "summary": "This is an example in XML",
+          "externalValue": "https://example.org/examples/address-example.xml"
+        }
+      }
+    },
+    "text/plain": {
+      "examples": {
+        "textExample": {
+          "summary": "This is a text example",
+          "externalValue": "https://foo.bar/examples/address-example.txt"
+        }
+      }
+    }
+  }
+}
+
+EXAMPLE-PARAMETERS-TEST ::= {
+  "name": "zipCode",
+  "in": "query",
+  "schema": {
+    "type": "string",
+    "format": "zip-code"
+  },
+  "examples": {
+    "zip-example": {
+      "\$ref": "#/components/examples/zip-example"
+    }
+  }
+}
+
+EXAMPLE-RESPONSE-TEST ::= {
+  "responses": {
+    "200": {
+      "description": "your car appointment has been booked",
+      "content": {
+        "application/json": {
+          "schema": {
+            "\$ref": "#/components/schemas/SuccessResponse"
+          },
+          "examples": {
+            "confirmation-success": {
+              "\$ref": "#/components/examples/confirmation-success"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+test-example:
+  request-body := RequestBody.build EXAMPLE-REQUEST-BODY-TEST context JsonPointer
+  expect-equals 3 request-body.content.size
+  content := request-body.content["application/json"]
+  examples := content.examples
+  expect-equals 2 examples.size
+  foo := examples["foo"]
+  expect-equals "A foo example" foo.summary
+  expect-structural-equals {"foo": "bar"} foo.value
+  bar := examples["bar"]
+  expect-equals "A bar example" bar.summary
+  expect-structural-equals {"bar": "baz"} bar.value
+  content = request-body.content["application/xml"]
+  examples = content.examples
+  expect-equals 1 examples.size
+  xml-example := examples["xmlExample"]
+  expect-equals "This is an example in XML" xml-example.summary
+  expect-equals "https://example.org/examples/address-example.xml" xml-example.external-value
+  content = request-body.content["text/plain"]
+  examples = content.examples
+  expect-equals 1 examples.size
+  text-example := examples["textExample"]
+  expect-equals "This is a text example" text-example.summary
+  expect-equals "https://foo.bar/examples/address-example.txt" text-example.external-value
+
+  json := request-body.to-json
+  expect-structural-equals EXAMPLE-REQUEST-BODY-TEST json
+
+  parameter := Parameter.build EXAMPLE-PARAMETERS-TEST context JsonPointer
+  expect-equals 1 parameter.examples.size
+  reference-example/Reference := parameter.examples["zip-example"]
+  expect-equals "#/components/examples/zip-example" reference-example.ref
+
+  json = parameter.to-json
+  expect-structural-equals EXAMPLE-PARAMETERS-TEST json
+
+  operation := Operation.build EXAMPLE-RESPONSE-TEST context JsonPointer
+  responses := operation.responses
+  expect-equals 1 responses.responses.size
+  response-200 := responses.responses["200"]
+  response-content := response-200.content["application/json"]
+  examples = response-content.examples
+  expect-equals 1 examples.size
+  reference-example = examples["confirmation-success"]
+  expect-equals "#/components/examples/confirmation-success" reference-example.ref
+
+  json = operation.to-json
+  expect-structural-equals EXAMPLE-RESPONSE-TEST json
+
+TODO: link examples
 
 REFERENCE-OBJECT-EXAMPLE ::= {
   "\$ref": "#/components/schemas/Pet"

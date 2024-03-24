@@ -1669,36 +1669,217 @@ class Response extends Extensionable_:
     return result
 
 /**
+A runtime expression as defined by
+  https://spec.openapis.org/oas/v3.1.0#runtime-expressions
+*/
+class RuntimeExpression:
+  expression/string
+
+  constructor .expression:
+
+  hash-code -> int:
+    return expression.hash-code
+
+  operator == other -> bool:
+    return other is RuntimeExpression and expression == other.expression
+
+  static try-parse str/string -> RuntimeExpression?:
+    // TODO(florian): implement this.
+    return str.starts-with "\$"
+        ? RuntimeExpression str
+        : null
+
+/**
 A map of possible out-of band callbacks related to the parent operation.
 */
 class Callback extends Extensionable_:
   /**
   A map of possible out-of band callbacks related to the parent operation.
 
-  Each value in the map is a $PathItem (or $Reference) that describes a
+  Each key is a $RuntimeExpression.
+  Each value is a $PathItem (or $Reference) that describes a
     set of requests that may be initiated by the API provider and the
     expected responses.
-  The key value used to identify the path-item object is an expression,
-    evaluated at runtime, that identifies a URL to use for the callback
-    operation.
 
   See $OpenApi.webhooks to describe incoming requests from the API provider
     independent from another API call.
-
-  # Key Expression
-  Keys must be [runtime expressions](https://spec.openapis.org/oas/v3.1.0#runtime-expressions) which allow defining values based on information that will only be available within the HTTP message in an actual API call.
   */
-  TODO: florian: make Runtime expressions actual objects.
-  callbacks/Map  // From string to PathItem or Reference.
+  callbacks/Map  // From RuntimeExpression to PathItem or Reference.
 
   constructor --.callbacks --extensions/Map?=null:
     super --extensions=extensions
 
   static build o/Map context/BuildContext pointer/JsonPointer:
+    callbacks := {:}
+    o.do: | key/string value |
+      callbacks[RuntimeExpression key] = value.get "\$ref"
+          --if-present=: Reference.build value context pointer[key]
+          --if-absent=: PathItem.build value context pointer[key]
+    return Callback
+        --callbacks=callbacks
+        --extensions=Extensionable_.extract-extensions o
 
-    throw "UNIMPLEMENTED"
-  to-json -> Map: throw "UNIMPLEMENTED"
+  to-json -> Map:
+    result := {:}
+    callbacks.do: | key value |
+      result[key.expression] = value.to-json
+    return result
 
+/**
+An example for the API operation.
+*/
+class Example extends Extensionable_:
+  /** A short description of the example. */
+  summary/string?
+
+  /**
+  A long description of the example.
+  CommonMark syntax may be used for rich text representation.
+  */
+  description/string?
+
+  /**
+  An embedded literal example.
+  This field and the $external-value fields are mutually exclusive.
+
+  Examples of media types that cannot be represent in JSON/Yaml can be
+    described using a string value, escaping where necessary.
+  */
+  value/any?
+
+  /**
+  A URI that points to the literal example.
+  This provides the capability to reference examples that cannot easily be
+    included in JSON or YAML documents.
+
+  This field and the $value field are mutually exclusive.
+  */
+  external-value/string?
+
+  constructor
+      --.summary=null
+      --.description=null
+      --.value=null
+      --.external-value=null
+      --extensions/Map?=null:
+    super --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> Example:
+    return Example
+      --summary=o.get "summary"
+      --description=o.get "description"
+      --value=o.get "value"
+      --external-value=o.get "externalValue"
+      --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    result := {:}
+    if summary: result["summary"] = summary
+    if description: result["description"] = description
+    if value: result["value"] = value
+    if external-value: result["externalValue"] = external-value
+    add-extensions-to-json_ result
+    return result
+
+class Link extends Extensionable_:
+  /**
+  A relative or absolute URI reference to an OAS operation.
+
+  This field is mutually exclusive of the $operation-id field.
+  It must point to an $Operation object.
+  Relative $operation-ref values may be used to locate an existing
+    $Operation object in the OpenAPI document.
+  */
+  operation-ref/string?
+
+  /**
+  The name of an existing, resolvable OAS operation, as defined with a
+    unique $operation-id.
+
+  This field is mutually exclusive of the $operation-ref field.
+  */
+  operation-id/string?
+
+  /**
+  A map of parameters to pass to an operation as specified with $operation-id
+    or identified via $operation-ref.
+
+  The key is the parameter name to be used.
+  The value can be a constant or an $RuntimeExpression to be evaluated and passed
+    to the linked operation.
+  The parameter name can be qualified using the parameter location `[{in}.]{name}` for
+    operations that use the same parameter name in different locations (e.g. `path.id`).
+  */
+  parameters/Map?  // From string to any.
+
+  /**
+  A literal value or $RuntimeExpression to use as a request body when calling
+    the target operation.
+  */
+  request-body/any?
+
+  /**
+  A description of the link.
+  */
+  description/string?
+
+  /**
+  A server object to be used by the target operation.
+  */
+  server/Server?
+
+  constructor
+      --.operation-ref=null
+      --.operation-id=null
+      --.parameters={:}
+      --.request-body=null
+      --.description=null
+      --.server=null
+      --extensions/Map?=null:
+    if not operation-ref and not operation-id:
+      throw "Link must contain either an operation-ref or an operation-id"
+    super --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> Link:
+    parameters := o.get "parameters" --if-present=: | json-parameters/Map |
+        json-parameters.map: | key value |
+          runtime := value is string
+              ? RuntimeExpression.try-parse value
+              : value
+          runtime or value
+    request-body := o.get "requestBody" --if-present=: | json-body |
+        runtime := json-body is string
+            ? RuntimeExpression.try-parse json-body
+            : json-body
+        runtime or json-body
+
+    return Link
+      --operation-ref=o.get "operationRef"
+      --operation-id=o.get "operationId"
+      --parameters=parameters
+      --request-body=request-body
+      --description=o.get "description"
+      --server=o.get "server" --if-present=: Server.build it context pointer["server"]
+      --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    result := {:}
+    if operation-ref: result["operationRef"] = operation-ref
+    if operation-id: result["operationId"] = operation-id
+    if parameters:
+      json-parameters := parameters.map: | _ value |
+        value is RuntimeExpression
+            ? value.expression
+            : value
+      result["parameters"] = json-parameters
+    if request-body:
+      result["requestBody"] = request-body is RuntimeExpression
+          ? request-body.expression
+          : request-body
+    if description: result["description"] = description
+    if server: result["server"] = server.to-json
+    add-extensions-to-json_ result
+    return result
 
 /**
 A simple object to allow referencing other components in the OpenAPI
@@ -1766,19 +1947,11 @@ class Schema:
   to-json -> Map:
     return original-json_
 
-class Example:
-  static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
-  to-json -> Map: throw "UNIMPLEMENTED"
-
 class Header:
   static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
   to-json -> Map: throw "UNIMPLEMENTED"
 
 class SecurityScheme:
-  static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
-  to-json -> Map: throw "UNIMPLEMENTED"
-
-class Link:
   static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
   to-json -> Map: throw "UNIMPLEMENTED"
 
