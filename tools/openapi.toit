@@ -1347,10 +1347,13 @@ class RequestBody extends Extensionable_:
     super --extensions=extensions
 
   static build o/Map context/BuildContext pointer/JsonPointer -> RequestBody:
+    content-json := o["content"]
     content-pointer := pointer["content"]
+    content := content-json.map: | key value |
+      MediaType.build value context content-pointer[key]
     return RequestBody
       --description=o.get "description"
-      --content=o["content"].map: | key value | MediaType.build value context content-pointer[key]
+      --content=content
       --required=o.get "required"
       --extensions=Extensionable_.extract-extensions o
 

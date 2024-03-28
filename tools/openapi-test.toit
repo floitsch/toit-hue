@@ -631,8 +631,6 @@ REQUEST-BODY2-EXAMPLE ::= {
 }
 
 test-request-body:
-  print "TODO: test request body"
-  /*
   request-body := RequestBody.build REQUEST-BODY-EXAMPLE context JsonPointer
   expect-equals "user to add to the system" request-body.description
   content := request-body.content
@@ -640,8 +638,44 @@ test-request-body:
   expect-equals "application/json" content.keys.first
   expect-equals "application/xml" content.keys[1]
   expect-equals "text/plain" content.keys[2]
-  */
-  //expect-equals "*/*" content.keys[3]
+  expect-equals "*/*" content.keys[3]
+
+  media-type/MediaType := content["application/json"]
+  expect-equals 1 media-type.examples.size
+  example/Example := media-type.examples["user"]
+  expect-equals "User Example" example.summary
+  expect-equals "https://foo.bar/examples/user-example.json" example.external-value
+
+  media-type = content["application/xml"]
+  expect-equals 1 media-type.examples.size
+  example = media-type.examples["user"]
+  expect-equals "User example in XML" example.summary
+  expect-equals "https://foo.bar/examples/user-example.xml" example.external-value
+
+  media-type = content["text/plain"]
+  expect-equals 1 media-type.examples.size
+  example = media-type.examples["user"]
+  expect-equals "User example in Plain text" example.summary
+  expect-equals "https://foo.bar/examples/user-example.txt" example.external-value
+
+  media-type = content["*/*"]
+  expect-equals 1 media-type.examples.size
+  example = media-type.examples["user"]
+  expect-equals "User example in other format" example.summary
+
+  json := request-body.to-json
+  expect-structural-equals REQUEST-BODY-EXAMPLE json
+
+  request-body = RequestBody.build REQUEST-BODY2-EXAMPLE context JsonPointer
+  expect-equals "user to add to the system" request-body.description
+  expect request-body.required
+  content = request-body.content
+  expect-equals 1 content.size
+  expect-equals "text/plain" content.keys.first
+  media-type = content["text/plain"]
+
+  json = request-body.to-json
+  expect-structural-equals REQUEST-BODY2-EXAMPLE json
 
 MEDIA-TYPE-EXAMPLE ::= {
   "application/json": {
@@ -678,7 +712,31 @@ MEDIA-TYPE-EXAMPLE ::= {
 }
 
 test-media-type:
-  print "TODO: test media type"
+  media-type := MediaType.build MEDIA-TYPE-EXAMPLE["application/json"] context JsonPointer
+  expect-equals 3 media-type.examples.size
+  example/Example := media-type.examples["cat"]
+  expect-equals "An example of a cat" example.summary
+  expect-structural-equals {
+    "name": "Fluffy",
+    "petType": "Cat",
+    "color": "White",
+    "gender": "male",
+    "breed": "Persian",
+  } example.value
+  example = media-type.examples["dog"]
+  expect-equals "An example of a dog with a cat's name" example.summary
+  expect-structural-equals {
+    "name": "Puma",
+    "petType": "Dog",
+    "color": "Black",
+    "gender": "Female",
+    "breed": "Mixed",
+  } example.value
+  reference-example/Reference := media-type.examples["frog"]
+  expect-equals "#/components/examples/frog-example" reference-example.ref
+
+  json := media-type.to-json
+  expect-structural-equals MEDIA-TYPE-EXAMPLE["application/json"] json
 
 ENCODING-EXAMPLE1 ::= {
   "contentType": "application/xml; charset=utf-8"
@@ -704,13 +762,15 @@ test-encoding:
   json := encoding.to-json
   expect-structural-equals ENCODING-EXAMPLE1 json
 
-  print "TODO: test encoding part 2"
-  // encoding = Encoding.build ENCODING-EXAMPLE2 context JsonPointer
-  // expect-equals "image/png, image/jpeg" encoding.content-type
-  // expect-equals 1 encoding.headers.size
+  encoding = Encoding.build ENCODING-EXAMPLE2 context JsonPointer
+  expect-equals "image/png, image/jpeg" encoding.content-type
+  expect-equals 1 encoding.headers.size
+  header/Parameter := encoding.headers["X-Rate-Limit-Limit"]
+  expect header.is-header
+  expect-equals "The number of allowed requests in the current period" header.description
 
-  // json = encoding.to-json
-  // expect-structural-equals ENCODING-EXAMPLE2 json
+  json = encoding.to-json
+  expect-structural-equals ENCODING-EXAMPLE2 json
 
 RESPONSES-EXAMPLE ::= {
   "200": {
@@ -828,7 +888,24 @@ test-response:
   json = response.to-json
   expect-structural-equals RESPONSE-EXAMPLE2 json
 
-  print "TODO: test response part 3"
+  response = Response.build RESPONSE-EXAMPLE3 context JsonPointer
+  expect-equals "A simple string response" response.description
+  expect-equals 1 response.content.size
+  expect-equals "text/plain" response.content.keys.first
+
+  expect-equals 3 response.headers.size
+  header := response.headers["X-Rate-Limit-Limit"]
+  expect header.is-header
+  expect-equals "The number of allowed requests in the current period" header.description
+  header = response.headers["X-Rate-Limit-Remaining"]
+  expect header.is-header
+  expect-equals "The number of remaining requests in the current period" header.description
+  header = response.headers["X-Rate-Limit-Reset"]
+  expect header.is-header
+  expect-equals "The number of seconds left in the current period" header.description
+
+  json = response.to-json
+  expect-structural-equals RESPONSE-EXAMPLE3 json
 
 CALLBACK-EXAMPLE ::= {
   "{\$request.query.queryUrl}": {
