@@ -25,6 +25,8 @@ main:
   test-response
   test-callback
   test-example
+  test-link
+  test-header
   test-reference
   test-schema
 
@@ -414,7 +416,7 @@ test-path-item:
   expect-equals 1 parameters.size
   parameter := parameters.first
   expect-equals "id" parameter.name
-  expect-equals "path" parameter.in
+  expect-equals Parameter.PATH parameter.in
   expect-equals "ID of pet to use" parameter.description
   expect parameter.required
   expect-equals "simple" parameter.style
@@ -989,7 +991,172 @@ test-example:
   json = operation.to-json
   expect-structural-equals EXAMPLE-RESPONSE-TEST json
 
-TODO: link examples
+LINK-EXAMPLE1 ::= {
+  "paths": {
+    "/users/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "the user identifier, as userId",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "responses": {
+          "200": {
+            "description": "the user being returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "uuid": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            },
+            "links": {
+              "address": {
+                "operationId": "getUserAddress",
+                "parameters": {
+                  "userId": "\$request.path.id"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{userid}/address": {
+      "parameters": [
+        {
+          "name": "userid",
+          "in": "path",
+          "required": true,
+          "description": "the user identifier, as userId",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getUserAddress",
+        "responses": {
+          "200": {
+            "description": "the user's address"
+          }
+        }
+      }
+    }
+  }
+}
+
+LINK-EXAMPLE2 ::= {
+  "links": {
+    "address": {
+      "operationId": "getUserAddressByUUID",
+      "parameters": {
+        "userUuid": "\$response.body#/uuid"
+      }
+    }
+  }
+}
+
+LINK-EXAMPLE3 ::= {
+  "links": {
+    "UserRepositories": {
+      "operationRef": "#/paths/~12.0~1repositories~1{username}/get",
+      "parameters": {
+        "username": "\$response.body#/username"
+      }
+    }
+  }
+}
+
+LINK-EXAMPLE4 ::= {
+  "links": {
+    "UserRepositories": {
+      "operationRef": "https://na2.gigantic-server.com/#/paths/~12.0~1repositories~1{username}/get",
+      "parameters": {
+        "username": "\$response.body#/username"
+      }
+    }
+  }
+}
+
+test-link:
+  paths := Paths.build LINK-EXAMPLE1["paths"] context JsonPointer
+  // Only looking at the links entry.
+  links := paths.paths["/users/{id}"].get.responses.responses["200"].links
+  expect-equals 1 links.size
+  link/Link := links["address"]
+  expect-equals "getUserAddress" link.operation-id
+  expect-equals 1 link.parameters.size
+  parameter := link.parameters["userId"]
+  expect-equals "\$request.path.id" parameter.expression
+
+  json := paths.to-json
+  expect-structural-equals LINK-EXAMPLE1["paths"] json
+
+  components := Components.build LINK-EXAMPLE2 context JsonPointer
+  links = components.links
+  expect-equals 1 links.size
+  link = links["address"]
+  expect-equals "getUserAddressByUUID" link.operation-id
+  expect-equals 1 link.parameters.size
+  parameter = link.parameters["userUuid"]
+  expect-equals "\$response.body#/uuid" parameter.expression
+
+  json = components.to-json
+  expect-structural-equals LINK-EXAMPLE2 json
+
+  components = Components.build LINK-EXAMPLE3 context JsonPointer
+  links = components.links
+  expect-equals 1 links.size
+  link = links["UserRepositories"]
+  expect-equals "#/paths/~12.0~1repositories~1{username}/get" link.operation-ref
+  expect-equals 1 link.parameters.size
+  parameter = link.parameters["username"]
+  expect-equals "\$response.body#/username" parameter.expression
+
+  json = components.to-json
+  expect-structural-equals LINK-EXAMPLE3 json
+
+  components = Components.build LINK-EXAMPLE4 context JsonPointer
+  links = components.links
+  expect-equals 1 links.size
+  link = links["UserRepositories"]
+  expect-equals "https://na2.gigantic-server.com/#/paths/~12.0~1repositories~1{username}/get" link.operation-ref
+  expect-equals 1 link.parameters.size
+  parameter = link.parameters["username"]
+  expect-equals "\$response.body#/username" parameter.expression
+
+  json = components.to-json
+  expect-structural-equals LINK-EXAMPLE4 json
+
+HEADER-EXAMPLE ::= {
+  "description": "The number of allowed requests in the current period",
+  "schema": {
+    "type": "integer"
+  }
+}
+
+test-header:
+  header := Parameter.build-header HEADER-EXAMPLE context JsonPointer
+  expect header.is-header
+  expect-equals "" header.name
+  expect-equals Parameter.HEADER header.in
+  expect-equals "The number of allowed requests in the current period" header.description
+
+  json := header.to-json
+  expect-structural-equals HEADER-EXAMPLE json
 
 REFERENCE-OBJECT-EXAMPLE ::= {
   "\$ref": "#/components/schemas/Pet"
@@ -1057,4 +1224,3 @@ test-schema:
   // Just make sure that the schemas can be parsed.
   schema := Schema.build SCHEMA-PRIMITIVE-EXAMPLE context JsonPointer
   schema = Schema.build SCHEMA-MODEL-EXAMPLE context JsonPointer
-

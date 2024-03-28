@@ -451,34 +451,37 @@ Example field names: `User`, `User_1`, `User_Name`, `user-name`, `my.org.User`.
 */
 // https://spec.openapis.org/oas/v3.1.0#components-object
 class Components extends Extensionable_:
-  /** An object to hold reusable $Schema Objects. */
+  /** An object to hold reusable $Schema objects. */
   schemas/Map? // from string to Schema.
 
-  /** An object to hold reusable $Response Objects. */
+  /** An object to hold reusable $Response objects. */
   responses/Map? // from string to Response or Reference.
 
-  /** An object to hold reusable $Parameter Objects. */
+  /** An object to hold reusable $Parameter objects. */
   parameters/Map? // from string to Parameter or Reference.
 
-  /** An object to hold reusable $Example Objects. */
+  /** An object to hold reusable $Example objects. */
   examples/Map? // from string to Example or Reference.
 
-  /** An object to hold reusable $RequestBody Objects. */
+  /** An object to hold reusable $RequestBody objects. */
   request-bodies/Map? // from string to RequestBody or Reference.
 
-  /** An object to hold reusable $Header Objects. */
+  /**
+  An object to hold reusable $Parameter objects, for which the field
+    $Parameter.is-header is set.
+  */
   headers/Map? // from string to Header or Reference.
 
-  /** An object to hold reusable $SecurityScheme Objects. */
+  /** An object to hold reusable $SecurityScheme objects. */
   security-schemes/Map? // from string to SecurityScheme or Reference.
 
-  /** An object to hold reusable $Link Objects. */
+  /** An object to hold reusable $Link objects. */
   links/Map? // from string to Link or Reference.
 
-  /** An object to hold reusable $Callback Objects. */
+  /** An object to hold reusable $Callback objects. */
   callbacks/Map? // from string to Callback or Reference.
 
-  /** An object to hold reusable $PathItem Objects. */
+  /** An object to hold reusable $PathItem objects. */
   path-items/Map? // from string to PathItem.
 
   constructor
@@ -522,7 +525,7 @@ class Components extends Extensionable_:
         --parameters=map-values_ o "parameters" context pointer: | v c p | Parameter.build v c p
         --examples=map-values_ o "examples" context pointer: | v c p | Example.build v c p
         --request-bodies=map-values_  o "requestBodies" context pointer: | v c p | RequestBody.build v c p
-        --headers=map-values_ o "headers" context pointer: | v c p | Header.build v c p
+        --headers=map-values_ o "headers" context pointer: | v c p | Parameter.build-header v c p
         --security-schemes=map-values_ o "securitySchemes" context pointer: | v c p | SecurityScheme.build v c p
         --links=map-values_ o "links" context pointer: | v c p | Link.build v c p
         --callbacks=map-values_ o "callbacks" context pointer: | v c p | Callback.build v c p
@@ -959,6 +962,13 @@ There are four possible parameter locations specified by the `in` field:
 - `cookie` - Used to pass a specific cookie value to the API.
 
 A parameter must have either $schema or $content set, but not both.
+
+# Headers
+Headers are the same as parameters, except for the following differences:
+- The $Parameter.name field only exists in parameters but not in headers. For
+  header objects, the name is given in the corresponding headers map, and the
+  $name field is set to "".
+- The $Parameter.in is implicitly set to $HEADER.
 */
 class Parameter extends Extensionable_:
   static PATH ::= "path"
@@ -1224,6 +1234,11 @@ class Parameter extends Extensionable_:
   */
   content/Map?  // From string to MediaType.
 
+  /**
+  Whether this object is a header.
+  */
+  is-header/bool
+
   constructor
       --.name
       --.in
@@ -1238,13 +1253,27 @@ class Parameter extends Extensionable_:
       --.example=null
       --.examples=null
       --.content=null
+      --.is-header
       --extensions/Map?=null:
     super --extensions=extensions
 
   static build o/Map context/BuildContext pointer/JsonPointer -> Parameter:
+    return build_ o o["name"] o["in"] --is-header=false context pointer
+
+  static build-header o/Map context/BuildContext pointer/JsonPointer -> Parameter:
+    return build_ o "" HEADER --is-header=true context pointer
+
+  static build_ -> Parameter
+      o/Map
+      name/string
+      in/string
+      --is-header/bool
+      context/BuildContext
+      pointer/JsonPointer
+  :
     return Parameter
-      --name=o["name"]
-      --in=o["in"]
+      --name=name
+      --in=in
       --description=o.get "description"
       --required=o.get "required"
       --deprecated=o.get "deprecated"
@@ -1265,13 +1294,14 @@ class Parameter extends Extensionable_:
           content-pointer := pointer["content"]
           json-content.map: | key/string value/Map |
             MediaType.build value context content-pointer[key]
+      --is-header=is-header
       --extensions=Extensionable_.extract-extensions o
 
   to-json -> Map:
-    result := {
-      "name": name,
-      "in": in,
-    }
+    result := {:}
+    if not is-header:
+      result["name"] = name
+      result["in"] = in
     if description: result["description"] = description
     if required: result["required"] = required
     if deprecated: result["deprecated"] = deprecated
@@ -1429,7 +1459,8 @@ class Encoding extends Extensionable_:
     ignored in this section. This property is ignored if the request
     body media type is not a `multipart`.
 
-  The values are either of type $Header or $Reference.
+  The values are either of type $Parameter, with $Parameter.is-header set to true
+    or of type $Reference.
   */
   headers/Map?
 
@@ -1497,7 +1528,7 @@ class Encoding extends Extensionable_:
         json-headers.map: | key value |
           value.get "\$ref"
               --if-present=: Reference.build value context headers-pointer[key]
-              --if-absent=: Header.build value context headers-pointer[key]
+              --if-absent=: Parameter.build-header value context headers-pointer[key]
     return Encoding
       --content-type=o.get "contentType"
       --headers=headers
@@ -1640,7 +1671,7 @@ class Response extends Extensionable_:
         json-headers.map: | key value |
           value.get "\$ref"
               --if-present=: Reference.build value context headers-pointer[key]
-              --if-absent=: Header.build value context headers-pointer[key]
+              --if-absent=: Parameter.build-header value context headers-pointer[key]
     content := o.get "content" --if-present=: | json-content/Map |
         content-pointer := pointer["content"]
         json-content.map: | key value |
@@ -1946,10 +1977,6 @@ class Schema:
 
   to-json -> Map:
     return original-json_
-
-class Header:
-  static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
-  to-json -> Map: throw "UNIMPLEMENTED"
 
 class SecurityScheme:
   static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
