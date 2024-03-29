@@ -27,8 +27,12 @@ main:
   test-example
   test-link
   test-header
+  test-tag
   test-reference
   test-schema
+  test-security-scheme
+  test-oauth-flow
+  test-security-requirements
 
 // Example from 4.8.2.2.
 INFO-EXAMPLE ::= {
@@ -309,7 +313,50 @@ COMPONENTS-EXAMPLE ::= {
 }
 
 test-components:
-  print "TODO: test components"
+  components := Components.build COMPONENTS-EXAMPLE context JsonPointer
+  expect-equals 3 components.schemas.size
+  ["GeneralError", "Category", "Tag"].do: expect (components.schemas.contains it)
+
+  expect-equals 2 components.parameters.size
+  parameter/Parameter := components.parameters["skipParam"]
+  expect-equals "skip" parameter.name
+  expect-equals Parameter.QUERY parameter.in
+  expect-equals "number of items to skip" parameter.description
+  expect parameter.required
+  parameter = components.parameters["limitParam"]
+  expect-equals "limit" parameter.name
+  expect-equals Parameter.QUERY parameter.in
+  expect-equals "max records to return" parameter.description
+  expect parameter.required
+
+  expect-equals 3 components.responses.size
+  not-found := components.responses["NotFound"]
+  expect-equals "Entity not found." not-found.description
+  illegal-input := components.responses["IllegalInput"]
+  expect-equals "Illegal input for operation." illegal-input.description
+  general-error := components.responses["GeneralError"]
+  expect-equals "General Error" general-error.description
+  expect-equals 1 general-error.content.size
+  media-type/MediaType := general-error.content["application/json"]
+
+  expect-equals 2 components.security-schemes.size
+  api-key/SecuritySchemeApiKey := components.security-schemes["api_key"]
+  expect-equals "apiKey" api-key.type
+  expect-equals "api_key" api-key.name
+  expect-equals "header" api-key.in
+  petstore-auth/SecuritySchemeOAuth2 := components.security-schemes["petstore_auth"]
+  expect-equals "oauth2" petstore-auth.type
+  flows := petstore-auth.flows
+  implicit := flows.implicit
+  expect-equals "https://example.org/api/oauth/dialog" implicit.authorization-url
+  scopes := implicit.scopes
+  expect-structural-equals {
+    "write:pets": "modify pets in your account",
+    "read:pets": "read your pets",
+  } scopes
+
+  json := components.to-json
+  expect-structural-equals COMPONENTS-EXAMPLE json
 
 // Example from 4.8.8.3.
 PATHS-EXAMPLE ::= {
@@ -488,39 +535,48 @@ OPERATION-EXAMPLE ::= {
 }
 
 test-operation:
-  print "TODO: test operation"
-  /*
   operation := Operation.build OPERATION-EXAMPLE context JsonPointer
   expect-equals 1 operation.tags.size
-  expect-equals "pet" operation.tags.first
+  tag/string := operation.tags.first
+  expect-equals "pet" tag
+
   expect-equals "Updates a pet in the store with form data" operation.summary
   expect-equals "updatePetWithForm" operation.operation-id
+
   expect-equals 1 operation.parameters.size
   parameter/Parameter := operation.parameters.first
   expect-equals "petId" parameter.name
   expect-equals "path" parameter.in
   expect-equals "ID of pet that needs to be updated" parameter.description
   expect parameter.required
+
   body/RequestBody := operation.request-body
   expect-equals 1 body.content.size
-  expect-equals "application/x-www-form-urlencoded" body.content.keys.first
+  content/MediaType := body.content["application/x-www-form-urlencoded"]
+
   responses := operation.responses
   expect-equals 2 responses.responses.size
-  response-200 := responses.responses["200"]
+
+  response-200/Response := responses.responses["200"]
   expect-equals "Pet updated." response-200.description
   expect-equals 2 response-200.content.size
-  expect-equals "application/json" response-200.content.keys.first
-  expect-equals "application/xml" response-200.content.keys[1]
-  response-405 := responses.responses["405"]
+  content = response-200.content["application/json"]
+  content = response-200.content["application/xml"]
+
+  response-405/Response := responses.responses["405"]
   expect-equals "Method Not Allowed" response-405.description
   expect-equals 2 response-405.content.size
-  expect-equals "application/json" response-405.content.keys.first
-  expect-equals "application/xml" response-405.content.keys[1]
-  expect-equals 1 operation.security.size
-  security := operation.security.first
-  expect-equals 2 security["petstore_auth"].size
-  */
+  content = response-405.content["application/json"]
+  content = response-405.content["application/xml"]
 
+  expect-equals 1 operation.security.size
+  requirements/SecurityRequirement := operation.security.first
+  expect-structural-equals {
+    "petstore_auth": ["write:pets", "read:pets"]
+  } requirements.requirements
+
+  json := operation.to-json
+  expect-structural-equals OPERATION-EXAMPLE json
 
 EXTERNAL-DOCUMENTATION-EXAMPLE ::= {
   "description": "Find more info here",
@@ -1235,6 +1291,19 @@ test-header:
   json := header.to-json
   expect-structural-equals HEADER-EXAMPLE json
 
+TAG-EXAMPLE ::= {
+  "name": "pet",
+  "description": "Pets operations",
+}
+
+test-tag:
+  tag := Tag.build TAG-EXAMPLE context JsonPointer
+  expect-equals "pet" tag.name
+  expect-equals "Pets operations" tag.description
+
+  json := tag.to-json
+  expect-structural-equals TAG-EXAMPLE json
+
 REFERENCE-OBJECT-EXAMPLE ::= {
   "\$ref": "#/components/schemas/Pet"
 }
@@ -1301,3 +1370,177 @@ test-schema:
   // Just make sure that the schemas can be parsed.
   schema := Schema.build SCHEMA-PRIMITIVE-EXAMPLE context JsonPointer
   schema = Schema.build SCHEMA-MODEL-EXAMPLE context JsonPointer
+
+SECURITY-SCHEME-BASIC-EXAMPLE ::= {
+  "type": "http",
+  "scheme": "basic"
+}
+
+SECURITY-SCHEME-API-KEY-EXAMPLE ::= {
+  "type": "apiKey",
+  "name": "api_key",
+  "in": "header"
+}
+
+SECURITY-SCHEME-JWT-BEARER-EAMPLE ::= {
+  "type": "http",
+  "scheme": "bearer",
+  "bearerFormat": "JWT",
+}
+
+SECURITY-SCHEME-OAUTH2-EXAMPLE ::= {
+  "type": "oauth2",
+  "flows": {
+    "implicit": {
+      "authorizationUrl": "https://example.org/api/oauth/dialog",
+      "scopes": {
+        "write:pets": "modify pets in your account",
+        "read:pets": "read your pets"
+      }
+    }
+  }
+}
+
+test-security-scheme:
+  security-scheme := SecurityScheme.build SECURITY-SCHEME-BASIC-EXAMPLE context JsonPointer
+  expect-equals SecurityScheme.HTTP security-scheme.type
+  security-scheme-http := security-scheme as SecuritySchemeHttp
+  expect-equals "basic" security-scheme-http.scheme
+
+  json := security-scheme.to-json
+  expect-structural-equals SECURITY-SCHEME-BASIC-EXAMPLE json
+
+  security-scheme = SecurityScheme.build SECURITY-SCHEME-API-KEY-EXAMPLE context JsonPointer
+  expect-equals SecurityScheme.API-KEY security-scheme.type
+  security-scheme-api-key := security-scheme as SecuritySchemeApiKey
+  expect-equals "api_key" security-scheme-api-key.name
+  expect-equals SecuritySchemeApiKey.HEADER security-scheme-api-key.in
+
+  json = security-scheme.to-json
+  expect-structural-equals SECURITY-SCHEME-API-KEY-EXAMPLE json
+
+  security-scheme = SecurityScheme.build SECURITY-SCHEME-JWT-BEARER-EAMPLE context JsonPointer
+  expect-equals SecurityScheme.HTTP security-scheme.type
+  security-scheme-http = security-scheme as SecuritySchemeHttp
+  expect-equals "bearer" security-scheme-http.scheme
+  expect-equals "JWT" security-scheme-http.bearer-format
+
+  json = security-scheme.to-json
+  expect-structural-equals SECURITY-SCHEME-JWT-BEARER-EAMPLE json
+
+  security-scheme = SecurityScheme.build SECURITY-SCHEME-OAUTH2-EXAMPLE context JsonPointer
+  expect-equals SecurityScheme.OAUTH2 security-scheme.type
+  security-scheme-oauth2 := security-scheme as SecuritySchemeOAuth2
+  flows := security-scheme-oauth2.flows
+  implicit := flows.implicit
+  expect-equals "https://example.org/api/oauth/dialog" implicit.authorization-url
+  scopes := implicit.scopes
+  expect-structural-equals {
+    "write:pets": "modify pets in your account",
+    "read:pets": "read your pets",
+  } scopes
+
+  json = security-scheme.to-json
+  expect-structural-equals SECURITY-SCHEME-OAUTH2-EXAMPLE json
+
+OAUTH-FLOW-EXAMPLE ::= {
+  "type": "oauth2",
+  "flows": {
+    "implicit": {
+      "authorizationUrl": "https://example.com/api/oauth/dialog",
+      "scopes": {
+        "write:pets": "modify pets in your account",
+        "read:pets": "read your pets"
+      }
+    },
+    "authorizationCode": {
+      "authorizationUrl": "https://example.com/api/oauth/dialog",
+      "tokenUrl": "https://example.com/api/oauth/token",
+      "scopes": {
+        "write:pets": "modify pets in your account",
+        "read:pets": "read your pets"
+      }
+    }
+  }
+}
+
+test-oauth-flow:
+  scheme := SecurityScheme.build OAUTH-FLOW-EXAMPLE context JsonPointer
+  oauth-scheme := scheme as SecuritySchemeOAuth2
+  implicit := oauth-scheme.flows.implicit
+  expect-equals "https://example.com/api/oauth/dialog" implicit.authorization-url
+  scopes := implicit.scopes
+  expect-structural-equals {
+    "write:pets": "modify pets in your account",
+    "read:pets": "read your pets",
+  } scopes
+  authorization-code := oauth-scheme.flows.authorization-code
+  expect-equals "https://example.com/api/oauth/dialog" authorization-code.authorization-url
+  expect-equals "https://example.com/api/oauth/token" authorization-code.token-url
+  scopes = authorization-code.scopes
+  expect-structural-equals {
+    "write:pets": "modify pets in your account",
+    "read:pets": "read your pets",
+  } scopes
+
+  json := scheme.to-json
+  expect-structural-equals OAUTH-FLOW-EXAMPLE json
+
+SECURITY-NON-OAUTH-EXAMPLE ::= {
+  "api_key": [],
+}
+
+SECURITY-OAUTH-EXAMPLE ::= {
+  "petstore_auth": [
+    "write:pets",
+    "read:pets",
+  ],
+}
+
+SECURITY-OPTIONAL-OAUTH-EXAMPLE ::= {
+  "security": [
+    {:},
+    {
+      "petstore_auth": [
+        "write:pets",
+        "read:pets",
+      ],
+    },
+  ],
+}
+
+test-security-requirements:
+  requirement := SecurityRequirement.build SECURITY-NON-OAUTH-EXAMPLE context JsonPointer
+  expect-structural-equals {
+    "api_key": [],
+  } requirement.requirements
+
+  json := requirement.to-json
+  expect-structural-equals SECURITY-NON-OAUTH-EXAMPLE json
+
+  requirement = SecurityRequirement.build SECURITY-OAUTH-EXAMPLE context JsonPointer
+  expect-structural-equals {
+    "petstore_auth": [
+      "write:pets",
+      "read:pets",
+    ],
+  } requirement.requirements
+
+  json = requirement.to-json
+  expect-structural-equals SECURITY-OAUTH-EXAMPLE json
+
+  operation := Operation.build SECURITY-OPTIONAL-OAUTH-EXAMPLE context JsonPointer
+  securities := operation.security
+  expect-equals 2 securities.size
+  requirements/SecurityRequirement := securities[0]
+  expect-structural-equals {:} requirements.requirements
+  requirements = securities[1]
+  expect-structural-equals {
+    "petstore_auth": [
+      "write:pets",
+      "read:pets",
+    ],
+  } requirements.requirements
+
+  json = operation.to-json
+  expect-structural-equals SECURITY-OPTIONAL-OAUTH-EXAMPLE json

@@ -106,7 +106,7 @@ class OpenApi extends Extensionable_:
   security/List?  // of SecurityRequirement.
 
   /**
-  A list of tags used by the specification with additional metadata.
+  A list of $Tag objects used by the specification with additional metadata.
   The order of the tags can be used to reflect on their order by the
     parsing tools. Not all tags that are used by the $Operation object
     must be declared. The tags that are not declared may be organized
@@ -145,6 +145,13 @@ class OpenApi extends Extensionable_:
     pointer := JsonPointer
     context := BuildContext
     context.json-schema-dialect = schema-dialect
+
+    tags/List? := null
+    o.get "tags" --if-present=: | json-tags/List |
+        tags = []
+        json-tags.size.repeat: | i |
+          tag := Tag.build json-tags[i] context pointer[i]
+          tags.add tag
     result := OpenApi
       --openapi=o["openapi"]
       --info=Info.build o["info"] context pointer["info"]
@@ -154,7 +161,7 @@ class OpenApi extends Extensionable_:
       --webhooks=o.get "webhooks"
       --components=o.get "components"
       --security=o.get "security"
-      --tags=o.get "tags"
+      --tags=tags
       --external-docs=o.get "externalDocs"
       --extensions=Extensionable_.extract-extensions o
     json-schema.resolve --context=context.json-schema-context
@@ -171,7 +178,7 @@ class OpenApi extends Extensionable_:
     if webhooks: result["webhooks"] = webhooks
     if components: result["components"] = components.to-json
     if security: result["security"] = security
-    if tags: result["tags"] = tags
+    if tags: result["tags"] = tags.map: it.to-json
     if external-docs: result["externalDocs"] = external-docs.to-json
     add-extensions-to-json_ result
     return result
@@ -1915,6 +1922,43 @@ class Link extends Extensionable_:
     add-extensions-to-json_ result
     return result
 
+class Tag extends Extensionable_:
+  /**
+  The name of the tag.
+  */
+  name/string
+
+  /**
+  A short description of the tag.
+  CommonMark syntax may be used for rich text representation.
+  */
+  description/string?
+
+  /**
+  Additional external documentation for this tag.
+  */
+  external-docs/ExternalDocumentation?
+
+  constructor --.name --.description=null --.external-docs=null --extensions/Map?=null:
+    super --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> Tag:
+    return Tag
+      --name=o["name"]
+      --description=o.get "description"
+      --external-docs=o.get "externalDocs" --if-present=:
+          ExternalDocumentation.build it context pointer["externalDocs"]
+      --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    result := {
+      "name": name,
+    }
+    if description: result["description"] = description
+    if external-docs: result["externalDocs"] = external-docs.to-json
+    add-extensions-to-json_ result
+    return result
+
 /**
 A simple object to allow referencing other components in the OpenAPI
   document; internally and externally.
@@ -1981,10 +2025,384 @@ class Schema:
   to-json -> Map:
     return original-json_
 
-class SecurityScheme:
-  static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
-  to-json -> Map: throw "UNIMPLEMENTED"
+/**
+A security scheme that can be used by the operations.
 
+The following security schemes are supported by OpenAPI:
+- HTTP authentication.
+- An API key (either as a header or as a query parameter).
+- Mutual TLS (use of a client certificate).
+- OAuth2's common flows: implicit (deprecated), password, client credentials
+  and authorization code.
+  Defined in [RFC6749](https://datatracker.ietf.org/doc/html/rfc6749).
+- OpenID Connect Discovery.
+*/
+class SecurityScheme extends Extensionable_:
+  static API-KEY ::= "apiKey"
+  static HTTP ::= "http"
+  static MUTUAL-TLS ::= "mutualTLS"
+  static OAUTH2 ::= "oauth2"
+  static OPENID-CONNECT ::= "openIdConnect"
+
+  /**
+  The type of the security scheme.
+
+  Must be one of $API-KEY, $HTTP, $MUTUAL-TLS, $OAUTH2, or $OPENID-CONNECT.
+  */
+  type/string
+
+  /**
+  A short description for security scheme.
+
+  CommonMark syntax may be used for rich text representation.
+  */
+  description/string?
+
+  constructor --.type --.description=null --extensions/Map?=null:
+    super --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> SecurityScheme:
+    type := o["type"]
+    if type == API-KEY: return SecuritySchemeApiKey.build o context pointer
+    if type == HTTP: return SecuritySchemeHttp.build o context pointer
+    if type == MUTUAL-TLS: return SecuritySchemeMutualTls.build o context pointer
+    if type == OAUTH2: return SecuritySchemeOAuth2.build o context pointer
+    if type == OPENID-CONNECT: return SecuritySchemeOpenIdConnect.build o context pointer
+    throw "Unknown security scheme type: $type"
+
+  to-json -> Map:
+    result := {
+      "type": type
+    }
+    if description: result["description"] = description
+    add-extensions-to-json_ result
+    return result
+
+
+class SecuritySchemeApiKey extends SecurityScheme:
+  static HEADER ::= "header"
+  static QUERY ::= "query"
+  static COOKIE ::= "cookie"
+
+  /**
+  The name of the header, query, or cookie parameter to be used.
+  */
+  name/string
+
+  /**
+  The location of the API key.
+
+  Must be one of $HEADER, $QUERY, or $COOKIE.
+  */
+  in/string
+
+  constructor --.name --.in --description/string?=null --extensions/Map?=null:
+    super --type=SecurityScheme.API-KEY --description=description --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> SecuritySchemeApiKey:
+    return SecuritySchemeApiKey
+      --name=o["name"]
+      --in=o["in"]
+      --description=o.get "description"
+      --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    result := super
+    result["name"] = name
+    result["in"] = in
+    return result
+
+class SecuritySchemeHttp extends SecurityScheme:
+  /**
+  The name of the HTTP Authorization scheme to be used in the Authorization header
+    as defined in [RFC7235](https://httpwg.org/specs/rfc7235.html).
+
+  The value should be registered in the
+    [IANA Authentication Scheme registry](https://www.iana.org/assignments/http-authschemes/http-authschemes.xhtml).
+  */
+  scheme/string
+
+  /**
+  A hint to the client to identify how the bearer token is formatted.
+
+  Bearer tokens are usually generated by the server, so this information is
+    primarily for documentation purposes.
+  */
+  bearer-format/string?
+
+  constructor --.scheme --.bearer-format=null --description/string?=null --extensions/Map?=null:
+    super --type=SecurityScheme.HTTP --description=description --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> SecuritySchemeHttp:
+    return SecuritySchemeHttp
+      --scheme=o["scheme"]
+      --bearer-format=o.get "bearerFormat"
+      --description=o.get "description"
+      --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    result := super
+    result["scheme"] = scheme
+    if bearer-format: result["bearerFormat"] = bearer-format
+    return result
+
+class SecuritySchemeMutualTls extends SecurityScheme:
+  constructor --description/string?=null --extensions/Map?=null:
+    super --type=SecurityScheme.MUTUAL-TLS --description=description --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> SecuritySchemeMutualTls:
+    return SecuritySchemeMutualTls
+      --description=o.get "description"
+      --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    return super
+
+class SecuritySchemeOAuth2 extends SecurityScheme:
+  /**
+  An object containing configuration information for the OAuth2 flow types.
+  */
+  flows/OAuthFlows
+
+  constructor --.flows --description/string?=null --extensions/Map?=null:
+    super --type=SecurityScheme.OAUTH2 --description=description --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> SecuritySchemeOAuth2:
+    return SecuritySchemeOAuth2
+      --flows=OAuthFlows.build o["flows"] context pointer["flows"]
+      --description=o.get "description"
+      --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    result := super
+    result["flows"] = flows.to-json
+    return result
+
+class SecuritySchemeOpenIdConnect extends SecurityScheme:
+  /**
+  The URL to the OpenID Connect discovery document.
+  This must be an absolute URL.
+  */
+  open-id-connect-url/string
+
+  constructor --.open-id-connect-url --description/string?=null --extensions/Map?=null:
+    super --type=SecurityScheme.OPENID-CONNECT --description=description --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> SecuritySchemeOpenIdConnect:
+    return SecuritySchemeOpenIdConnect
+      --open-id-connect-url=o["openIdConnectUrl"]
+      --description=o.get "description"
+      --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    result := {
+      "type": SecurityScheme.OPENID-CONNECT,
+      "openIdConnectUrl": open-id-connect-url,
+    }
+    if description: result["description"] = description
+    add-extensions-to-json_ result
+    return result
+
+class OAuthFlows extends Extensionable_:
+  /**
+  Configuration for the OAuth Implicit flow.
+  */
+  implicit/OAuthFlowImplicit?
+
+  /**
+  Configuration for the OAuth Resource Owner Password flow.
+  */
+  password/OAuthFlowPassword?
+
+  /**
+  Configuration for the OAuth Client Credentials flow.
+  */
+  client-credentials/OAuthFlowClientCredentials?
+
+  /**
+  Configuration for the OAuth Authorization Code flow.
+  */
+  authorization-code/OAuthFlowAuthorizationCode?
+
+  constructor
+      --.implicit=null
+      --.password=null
+      --.client-credentials=null
+      --.authorization-code=null
+      --extensions/Map?=null:
+    super --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> OAuthFlows:
+    return OAuthFlows
+      --implicit=o.get "implicit" --if-present=:
+          OAuthFlowImplicit.build o["implicit"] context pointer["implicit"]
+      --password=o.get "password" --if-present=:
+          OAuthFlowPassword.build o["password"] context pointer["password"]
+      --client-credentials=o.get "clientCredentials" --if-present=:
+          OAuthFlowClientCredentials.build o["clientCredentials"] context pointer["clientCredentials"]
+      --authorization-code=o.get "authorizationCode" --if-present=:
+          OAuthFlowAuthorizationCode.build o["authorizationCode"] context pointer["authorizationCode"]
+      --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    result := {:}
+    if implicit: result["implicit"] = implicit.to-json
+    if password: result["password"] = password.to-json
+    if client-credentials: result["clientCredentials"] = client-credentials.to-json
+    if authorization-code: result["authorizationCode"] = authorization-code.to-json
+    add-extensions-to-json_ result
+    return result
+
+class OAuthFlow extends Extensionable_:
+  /**
+  The URL to be used for obtaining refresh tokens.
+  This must be in the form of a URL.
+  The OAuth2 standard requires the use of TLS.
+  */
+  refresh-url/string?
+
+  /**
+  The available scopes for the OAuth2 security scheme.
+
+  A map between the scope name and a short description for it.
+  The map may be empty.
+  */
+  scopes/Map  // From string to string.
+
+  constructor --.scopes --.refresh-url=null --extensions/Map?=null:
+    super --extensions=extensions
+
+  to-json -> Map:
+    result := {
+      "scopes": scopes,
+    }
+    if refresh-url: result["refreshUrl"] = refresh-url
+    add-extensions-to-json_ result
+    return result
+
+class OAuthFlowImplicit extends OAuthFlow:
+  /**
+  The authorization URL to be used for this flow.
+  This must be in the form of a URL.
+  The OAuth2 standard requires the use of TLS.
+  */
+  authorization-url/string
+
+  constructor --.authorization-url --scopes/Map --refresh-url/string?=null --extensions/Map?=null:
+    super --scopes=scopes --refresh-url=refresh-url --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> OAuthFlowImplicit:
+    return OAuthFlowImplicit
+      --authorization-url=o["authorizationUrl"]
+      --scopes=o["scopes"]
+      --refresh-url=o.get "refreshUrl"
+      --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    result := super
+    result["authorizationUrl"] = authorization-url
+    return result
+
+class OAuthFlowPassword extends OAuthFlow:
+  /**
+  The token URL to be used for this flow.
+  This must be in the form of a URL.
+  The OAuth2 standard requires the use of TLS.
+  */
+  token-url/string
+
+  constructor --.token-url --scopes/Map --refresh-url/string?=null --extensions/Map?=null:
+    super --scopes=scopes --refresh-url=refresh-url --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> OAuthFlowPassword:
+    return OAuthFlowPassword
+      --token-url=o["tokenUrl"]
+      --scopes=o["scopes"]
+      --refresh-url=o.get "refreshUrl"
+      --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    result := super
+    result["tokenUrl"] = token-url
+    return result
+
+class OAuthFlowClientCredentials extends OAuthFlow:
+  /**
+  The token URL to be used for this flow.
+  This must be in the form of a URL.
+  The OAuth2 standard requires the use of TLS.
+  */
+  token-url/string
+
+  constructor --.token-url --scopes/Map --refresh-url/string?=null --extensions/Map?=null:
+    super --scopes=scopes --refresh-url=refresh-url --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> OAuthFlowClientCredentials:
+    return OAuthFlowClientCredentials
+      --token-url=o["tokenUrl"]
+      --scopes=o["scopes"]
+      --refresh-url=o.get "refreshUrl"
+      --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    result := super
+    result["tokenUrl"] = token-url
+    return result
+
+class OAuthFlowAuthorizationCode extends OAuthFlow:
+  /**
+  The authorization URL to be used for this flow.
+  This must be in the form of a URL.
+  The OAuth2 standard requires the use of TLS.
+  */
+  authorization-url/string
+
+  /**
+  The token URL to be used for this flow.
+  This must be in the form of a URL.
+  The OAuth2 standard requires the use of TLS.
+  */
+  token-url/string
+
+  constructor --.authorization-url --.token-url --scopes/Map --refresh-url/string?=null --extensions/Map?=null:
+    super --scopes=scopes --refresh-url=refresh-url --extensions=extensions
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> OAuthFlowAuthorizationCode:
+    return OAuthFlowAuthorizationCode
+      --authorization-url=o["authorizationUrl"]
+      --token-url=o["tokenUrl"]
+      --scopes=o["scopes"]
+      --refresh-url=o.get "refreshUrl"
+      --extensions=Extensionable_.extract-extensions o
+
+  to-json -> Map:
+    result := super
+    result["authorizationUrl"] = authorization-url
+    result["tokenUrl"] = token-url
+    return result
+
+/**
+A required security scheme to execute an operation.
+
+The contained map references security schemes declared in $Components.security-schemes.
+All the schemes must be satisfied for the operation to be permitted.
+*/
+// Note: the specification does not make this class extensible.
 class SecurityRequirement:
-  static build o/Map context/BuildContext pointer/JsonPointer: throw "UNIMPLEMENTED"
-  to-json -> Map: throw "UNIMPLEMENTED"
+  /**
+  A map between the name of a security scheme and a list.
+  The content of the list depends on the type of the scheme:
+  - For oauth2 schemes the values list the required security scopes. The list
+    may be empty if no scopes are required.
+  - For other schemes, the list may contain a list of role names to require
+    for the operation, but are not otherwise defined or exchanged in-band.
+  */
+  requirements/Map  // From string to List of string.
+
+  constructor --.requirements/Map:
+
+  static build o/Map context/BuildContext pointer/JsonPointer -> SecurityRequirement:
+    return SecurityRequirement --requirements=o
+
+  to-json -> Map:
+    return requirements
