@@ -1,5 +1,8 @@
+import uuid
+
 import .json-schema as json-schema
 import .json-schema.json-pointer show JsonPointer
+import .json-schema.uri
 
 /**
 A base class for OpenAPI class that can have extensions.
@@ -38,6 +41,50 @@ class BuildContext:
   json-schema-context := json-schema.BuildContext
       --default-vocabulary-uri=json-schema.OPENAPI-3-1-URI
 
+  uri/UriReference
+  store/Map ::= {:}
+
+  references/List := []
+
+  static random-uri_ -> UriReference:
+    return UriReference.parse "urn:uuid:$(uuid.uuid5 "json-schema" "$Time.now.ns-since-epoch")"
+
+  constructor --.uri=random-uri_:
+
+  add-to-store o/any --pointer/JsonPointer -> none:
+    escaped-json-pointer := UriReference.normalize-fragment pointer.to-fragment-string
+    object-uri := uri.with-fragment escaped-json-pointer
+    store[object-uri] = o
+
+build o/Map --uri/string?=null -> OpenApi:
+  schema-dialect := o.get "jsonSchemaDialect"
+  pointer := JsonPointer
+  if not uri: uri = "urn:uuid:$(uuid.uuid5 "json-schema" "$Time.now.ns-since-epoch")"
+  context := BuildContext --uri=(UriReference.parse uri)
+  context.json-schema-dialect = schema-dialect
+
+  openapi := parse o context pointer
+  resolve openapi context
+  return openapi
+
+parse o/Map context/BuildContext pointer/JsonPointer -> OpenApi:
+  return OpenApi.parse_ o context pointer
+
+resolve openapi/OpenApi context/BuildContext:
+  json-schema.resolve --context=context.json-schema-context
+  store := context.store
+  base-uri := context.uri
+  while not context.references.is-empty:
+    pending := context.references
+    context.references = []
+    pending.do: | ref/Reference |
+      assert: not ref.resolved_
+      resolved-uri := ref.target-uri.resolve --base=base-uri
+      target := store.get resolved-uri
+      if not target:
+        throw "Reference not found: $ref"
+      ref.resolved_ = target
+
 /** The root object of the OpenAPI document. */
 // https://spec.openapis.org/oas/v3.1.0#openapi-object
 class OpenApi extends Extensionable_:
@@ -52,7 +99,7 @@ class OpenApi extends Extensionable_:
   This field should be used by tooling to interpret the OpenAPI document. It
     is not related to the $Info.version string.
   */
-  openapi/string
+  openapi-version/string
 
   /**
   The metadata about the API.
@@ -122,7 +169,7 @@ class OpenApi extends Extensionable_:
 
   constructor
       --.url=null
-      --.openapi="3.0.0"
+      --.openapi-version="3.0.0"
       --.info
       --.json-schema-dialect=null
       --.servers=null
@@ -140,44 +187,62 @@ class OpenApi extends Extensionable_:
   The $url parameter is the URL where the OpenAPI document was originally
     retrieved from.
   */
-  static build --url/string?=null o/Map -> OpenApi:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer-> OpenApi:
+    openapi-version := o["openapi"]
+    info := Info.parse_ o["info"] context pointer["info"]
     schema-dialect := o.get "jsonSchemaDialect"
-    pointer := JsonPointer
-    context := BuildContext
-    context.json-schema-dialect = schema-dialect
-
-    tags/List? := null
-    o.get "tags" --if-present=: | json-tags/List |
-        tags = []
+    servers := o.get "servers" --if-present=: | json-servers/List |
+        servers-pointer := pointer["servers"]
+        servers := []
+        json-servers.size.repeat: | i |
+          servers.add (Server.parse_ json-servers[i] context servers-pointer[i])
+        servers
+    paths := Paths.parse_ o["paths"] context pointer["paths"]
+    webhooks := o.get "webhooks" --if-present=: | json-webhooks/Map |
+        webhooks-pointer := pointer["webhooks"]
+        json-webhooks.map: | key/string value |
+          PathItem.parse_ value context webhooks-pointer[key]
+    components := o.get "components" --if-present=:
+      Components.parse_ it context pointer["components"]
+    security := o.get "security" --if-present=: | json-security/List |
+        security := []
+        json-security.size.repeat: | i |
+          security.add (SecurityRequirement.parse_ json-security[i] context pointer[i])
+        security
+    tags := o.get "tags" --if-present=: | json-tags/List |
+        tags := []
         json-tags.size.repeat: | i |
-          tag := Tag.build json-tags[i] context pointer[i]
+          tag := Tag.parse_ json-tags[i] context pointer[i]
           tags.add tag
+        tags
+    external-docs := o.get "externalDocs" --if-present=:
+      ExternalDocumentation.parse_ it context pointer["externalDocs"]
+
     result := OpenApi
-      --openapi=o["openapi"]
-      --info=Info.build o["info"] context pointer["info"]
-      --json-schema-dialect=o.get schema-dialect
-      --servers=o.get "servers"
-      --paths=Paths.build o["paths"] context pointer["paths"]
-      --webhooks=o.get "webhooks"
-      --components=o.get "components"
-      --security=o.get "security"
+      --openapi-version=openapi-version
+      --info=info
+      --json-schema-dialect=schema-dialect
+      --servers=servers
+      --paths=paths
+      --webhooks=webhooks
+      --components=components
+      --security=security
       --tags=tags
-      --external-docs=o.get "externalDocs"
+      --external-docs=external-docs
       --extensions=Extensionable_.extract-extensions o
-    json-schema.resolve --context=context.json-schema-context
     return result
 
   to-json -> Map:
     result := {
-      "openapi": openapi,
+      "openapi": openapi-version,
       "info": info.to-json,
       "paths": paths.to-json,
     }
     if json-schema-dialect: result["jsonSchemaDialect"] = json-schema-dialect
-    if servers: result["servers"] = servers
-    if webhooks: result["webhooks"] = webhooks
+    if servers: result["servers"] = servers.map: | _ server/Server | server.to-json
+    if webhooks: result["webhooks"] = webhooks.map: | _ webhook/PathItem | webhook.to-json
     if components: result["components"] = components.to-json
-    if security: result["security"] = security
+    if security: result["security"] = security.map: it.to-json
     if tags: result["tags"] = tags.map: it.to-json
     if external-docs: result["externalDocs"] = external-docs.to-json
     add-extensions-to-json_ result
@@ -220,7 +285,7 @@ class Info extends Extensionable_:
 
   /**
   The version of the OpenAPI document.
-  This version is distinct from the $OpenApi.openapi version, or the
+  This version is distinct from the $OpenApi.openapi-version, or the
     API implementation version.
   */
   version/string
@@ -236,14 +301,14 @@ class Info extends Extensionable_:
       --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> Info:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> Info:
     return Info
       --title=o["title"]
       --summary=o.get "summary"
       --description=o.get "description"
       --terms-of-service=o.get "termsOfService"
-      --contact=o.get "contact" --if-present=: Contact.build it context pointer["contact"]
-      --license=o.get "license" --if-present=: License.build it context pointer["license"]
+      --contact=o.get "contact" --if-present=: Contact.parse_ it context pointer["contact"]
+      --license=o.get "license" --if-present=: License.parse_ it context pointer["license"]
       --version=o["version"]
       --extensions=Extensionable_.extract-extensions o
 
@@ -285,7 +350,7 @@ class Contact extends Extensionable_:
       --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> Contact:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> Contact:
     return Contact
       --name=o.get "name"
       --url=o.get "url"
@@ -329,7 +394,7 @@ class License extends Extensionable_:
       --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> License:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> License:
     return License
       --name=o["name"]
       --identifier=o.get "identifier"
@@ -376,11 +441,11 @@ class Server extends Extensionable_:
       --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> Server:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> Server:
     variables := o.get "variables" --if-present=: | o/Map |
       result := {:}
       o.do: | key value |
-        result[key] = ServerVariable.build value context pointer[key]
+        result[key] = ServerVariable.parse_ value context pointer[key]
       result
     return Server
       --url=o["url"]
@@ -428,7 +493,7 @@ class ServerVariable extends Extensionable_:
       --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> ServerVariable:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> ServerVariable:
     return ServerVariable
       --enum-values=o.get "enum"
       --default=o["default"]
@@ -510,8 +575,8 @@ class Components extends Extensionable_:
       key/string
       context/BuildContext
       pointer/JsonPointer
+      reference-kind/int
       [construct]
-      [reference]
   :
     o := components.get key
     if not o: return null
@@ -520,42 +585,33 @@ class Components extends Extensionable_:
     return o.map: | entry-key value |
       entry-pointer := o-pointer[entry-key]
       value.get "\$ref"
-          --if-present=: reference.call value context entry-pointer
-          --if-absent=: construct.call value context entry-pointer
+          --if-present=: Reference.parse_ --kind=reference-kind value context entry-pointer
+          --if-absent=: construct.call entry-key value context entry-pointer
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> Components:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> Components:
     return Components
         --schemas=o.get "schemas" --if-present=:
             schemas-pointer := pointer["schemas"]
             it.map: | key value |
-              Schema.build value context schemas-pointer[key]
-        --responses=map-values_ o "responses" context pointer
-            : | v c p | Response.build v c p
-            : | v c p | ReferenceResponse.build v c p
-        --parameters=map-values_ o "parameters" context pointer
-            : | v c p | Parameter.build v c p
-            : | v c p | ReferenceParameter.build v c p
-        --examples=map-values_ o "examples" context pointer
-            : | v c p | Example.build v c p
-            : | v c p | ReferenceExample.build v c p
-        --request-bodies=map-values_  o "requestBodies" context pointer
-            : | v c p | RequestBody.build v c p
-            : | v c p | ReferenceRequestBody.build v c p
-        --headers=map-values_ o "headers" context pointer
-            : | v c p | Parameter.build-header v c p
-            : | v c p | ReferenceParameter.build-header v c p
-        --security-schemes=map-values_ o "securitySchemes" context pointer
-            : | v c p | SecurityScheme.build v c p
-            : | v c p | ReferenceSecurityScheme.build v c p
-        --links=map-values_ o "links" context pointer
-            : | v c p | Link.build v c p
-            : | v c p | ReferenceLink.build v c p
-        --callbacks=map-values_ o "callbacks" context pointer
-            : | v c p | Callback.build v c p
-            : | v c p | ReferenceCallback.build v c p
-        --path-items=map-values_ o "pathItems" context pointer
-            : | v c p | PathItem.build v c p
-            : | v c p | ReferencePathItem.build v c p
+              Schema.parse_ value context schemas-pointer[key]
+        --responses=map-values_ o "responses" context pointer \
+            Reference.RESPONSE: | _ v c p | Response.parse_ v c p
+        --parameters=map-values_ o "parameters" context pointer \
+            Reference.PARAMETER: | name v c p | Parameter.parse_ v c p --name=name
+        --examples=map-values_ o "examples" context pointer \
+            Reference.EXAMPLE: | _ v c p | Example.parse_ v c p
+        --request-bodies=map-values_  o "requestBodies" context pointer \
+            Reference.REQUEST-BODY: | _ v c p | RequestBody.parse_ v c p
+        --headers=map-values_ o "headers" context pointer \
+            Reference.PARAMETER: | name v c p | Parameter.parse-header_ v c p --name=name
+        --security-schemes=map-values_ o "securitySchemes" context pointer \
+            Reference.SECURITY-SCHEME: | _ v c p | SecurityScheme.parse_ v c p
+        --links=map-values_ o "links" context pointer \
+            Reference.LINK: | _ v c p | Link.parse_ v c p
+        --callbacks=map-values_ o "callbacks" context pointer \
+            Reference.CALLBACK: | _ v c p | Callback.parse_ v c p
+        --path-items=map-values_ o "pathItems" context pointer \
+            Reference.PATH-ITEM: | _ v c p | PathItem.parse_ v c p
         --extensions=Extensionable_.extract-extensions o
 
   to-json -> Map:
@@ -606,9 +662,9 @@ class Paths extends Extensionable_:
       --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> Paths:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> Paths:
     return Paths
-      --paths=o.map: | key value | PathItem.build value context pointer[key]
+      --paths=o.map: | key value | PathItem.parse_ value context pointer[key]
       --extensions=Extensionable_.extract-extensions o
 
   to-json -> Map:
@@ -720,7 +776,7 @@ class PathItem extends Extensionable_:
       --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> PathItem:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> PathItem:
     parameters/List? := null
     o.get "parameters" --if-present=: | json-parameters/List |
         parameters-pointer := pointer["parameters"]
@@ -729,22 +785,22 @@ class PathItem extends Extensionable_:
           parameter-pointer := parameters-pointer[i]
           entry := json-parameters[i]
           parameter := entry.get "\$ref"
-              --if-present=: ReferenceParameter.build entry context parameter-pointer
-              --if-absent=: Parameter.build entry context parameter-pointer
+              --if-present=: Reference.parse_ --kind=Reference.PARAMETER entry context parameter-pointer
+              --if-absent=: Parameter.parse_ entry context parameter-pointer
           parameters.add parameter
 
     return PathItem
       --ref=o.get "\$ref"
       --summary=o.get "summary"
       --description=o.get "description"
-      --get=o.get "get" --if-present=: Operation.build it context pointer["get"]
-      --put=o.get "put" --if-present=: Operation.build it context pointer["put"]
-      --post=o.get "post" --if-present=: Operation.build it context pointer["post"]
-      --delete=o.get "delete" --if-present=: Operation.build it context pointer["delete"]
-      --options=o.get "options" --if-present=: Operation.build it context pointer["options"]
-      --head=o.get "head" --if-present=: Operation.build it context pointer["head"]
-      --patch=o.get "patch" --if-present=: Operation.build it context pointer["patch"]
-      --trace=o.get "trace" --if-present=: Operation.build it context pointer["trace"]
+      --get=o.get "get" --if-present=: Operation.parse_ it context pointer["get"]
+      --put=o.get "put" --if-present=: Operation.parse_ it context pointer["put"]
+      --post=o.get "post" --if-present=: Operation.parse_ it context pointer["post"]
+      --delete=o.get "delete" --if-present=: Operation.parse_ it context pointer["delete"]
+      --options=o.get "options" --if-present=: Operation.parse_ it context pointer["options"]
+      --head=o.get "head" --if-present=: Operation.parse_ it context pointer["head"]
+      --patch=o.get "patch" --if-present=: Operation.parse_ it context pointer["patch"]
+      --trace=o.get "trace" --if-present=: Operation.parse_ it context pointer["trace"]
       --servers=o.get "servers"
       --parameters=parameters
       --extensions=Extensionable_.extract-extensions o
@@ -880,9 +936,9 @@ class Operation extends Extensionable_:
       --extensions/Map?=null:
     super --extensions=extensions
 
-  static ref-or-object_ o context/BuildContext pointer/JsonPointer [construct] [reference] -> any:
+  static ref-or-object_ o context/BuildContext pointer/JsonPointer reference-kind/int [construct] -> any:
     return o.get "\$ref"
-        --if-present=: reference.call o context pointer
+        --if-present=: Reference.parse_ --kind=reference-kind o context pointer
         --if-absent=: construct.call o context pointer
 
   static map-list_ list/List pointer/JsonPointer [construct] -> List:
@@ -892,37 +948,34 @@ class Operation extends Extensionable_:
       result.add (construct.call entry pointer[i])
     return result
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> Operation:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> Operation:
     return Operation
       --tags=o.get "tags"
       --summary=o.get "summary"
       --description=o.get "description"
-      --external-docs=o.get "externalDocs" --if-present=: ExternalDocumentation.build it context pointer["externalDocs"]
+      --external-docs=o.get "externalDocs" --if-present=: ExternalDocumentation.parse_ it context pointer["externalDocs"]
       --operation-id=o.get "operationId"
       --parameters=o.get "parameters" --if-present=: | json-parameters/List |
           parameters-pointer := pointer["parameters"]
           map-list_ json-parameters parameters-pointer: | ref-or-parameter parameter-pointer/JsonPointer |
-            ref-or-object_ ref-or-parameter context parameter-pointer
-                : | v c p | Parameter.build v c p
-                : | v c p | ReferenceParameter.build v c p
+            ref-or-object_ ref-or-parameter context parameter-pointer \
+                Reference.PARAMETER: | v c p | Parameter.parse_ v c p
       --request-body=o.get "requestBody" --if-present=:
-          ref-or-object_ it context pointer["requestBody"]
-              : | v c p | RequestBody.build v c p
-              : | v c p | ReferenceRequestBody.build v c p
-      --responses=o.get "responses" --if-present=: Responses.build it context pointer["responses"]
+          ref-or-object_ it context pointer["requestBody"] \
+              Reference.REQUEST-BODY: | v c p | RequestBody.parse_ v c p
+      --responses=o.get "responses" --if-present=: Responses.parse_ it context pointer["responses"]
       --callbacks=o.get "callbacks" --if-present=: | json-callbacks/Map |
           callbacks-pointer := pointer["callbacks"]
           json-callbacks.map: | entry-key ref-or-callback |
-            ref-or-object_ ref-or-callback context callbacks-pointer[entry-key]
-                : | v c p | Callback.build v c p
-                : | v c p | ReferenceCallback.build v c p
+            ref-or-object_ ref-or-callback context callbacks-pointer[entry-key] \
+                Reference.CALLBACK: | v c p | Callback.parse_ v c p
       --deprecated=o.get "deprecated"
       --security=o.get "security" --if-present=: | json-security/List |
           map-list_ json-security pointer["security"]: | json-security/Map p/JsonPointer |
-            SecurityRequirement.build json-security context p
+            SecurityRequirement.parse_ json-security context p
       --servers=o.get "servers" --if-present=: | json-servers/List |
           map-list_ json-servers pointer["servers"]: | server/Map p/JsonPointer |
-            Server.build server context p
+            Server.parse_ server context p
       --extensions=Extensionable_.extract-extensions o
 
   to-json -> Map:
@@ -961,7 +1014,7 @@ class ExternalDocumentation extends Extensionable_:
   constructor --.description=null --.url --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> ExternalDocumentation:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> ExternalDocumentation:
     return ExternalDocumentation
       --description=o.get "description"
       --url=o["url"]
@@ -998,8 +1051,8 @@ A parameter must have either $schema or $content set, but not both.
 # Headers
 Headers are the same as parameters, except for the following differences:
 - The $Parameter.name field only exists in parameters but not in headers. For
-  header objects, the name is given in the corresponding headers map, and the
-  $name field is set to "".
+  header objects, the name is given in the corresponding headers map. The parsing
+  propagates the name.
 - The $Parameter.in is implicitly set to $HEADER.
 */
 class Parameter extends Extensionable_:
@@ -1289,13 +1342,18 @@ class Parameter extends Extensionable_:
       --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> Parameter:
-    return build_ o o["name"] o["in"] --is-header=false context pointer
+  static parse_ o/Map context/BuildContext pointer/JsonPointer --name/string?=null -> Parameter:
+    // OpenAPI 3.1.0 requires the name to be present, but some specs don't
+    // include it in the components section. Use it from there if it's missing.
+    o.get "name" --if-present=: name = o["name"]
+    if not name:
+      throw "Missing name in parameter: $o"
+    return parse_ o name o["in"] --is-header=false context pointer
 
-  static build-header o/Map context/BuildContext pointer/JsonPointer -> Parameter:
-    return build_ o "" HEADER --is-header=true context pointer
+  static parse-header_ o/Map context/BuildContext pointer/JsonPointer --name/string -> Parameter:
+    return parse_ o name HEADER --is-header=true context pointer
 
-  static build_ -> Parameter
+  static parse_ -> Parameter
       o/Map
       name/string
       in/string
@@ -1313,19 +1371,19 @@ class Parameter extends Extensionable_:
       --style=o.get "style"
       --explode=o.get "explode"
       --allow-reserved=o.get "allowReserved"
-      --schema=o.get "schema" --if-present=: Schema.build it context pointer["schema"]
+      --schema=o.get "schema" --if-present=: Schema.parse_ it context pointer["schema"]
       --example=o.get "example"
       --examples=o.get "examples" --if-present=: | json-examples/Map |
           examples-pointer := pointer["examples"]
           json-examples.map: | example-key/string value/Map |
             example-pointer := examples-pointer[example-key]
             value.get "\$ref"
-                --if-present=: ReferenceExample.build value context example-pointer
-                --if-absent=: Example.build value context example-pointer
+                --if-present=: Reference.parse_ --kind=Reference.EXAMPLE value context example-pointer
+                --if-absent=: Example.parse_ value context example-pointer
       --content=o.get "content" --if-present=: | json-content/Map |
           content-pointer := pointer["content"]
           json-content.map: | key/string value/Map |
-            MediaType.build value context content-pointer[key]
+            MediaType.parse_ value context content-pointer[key]
       --is-header=is-header
       --extensions=Extensionable_.extract-extensions o
 
@@ -1378,11 +1436,11 @@ class RequestBody extends Extensionable_:
   constructor --.description=null --.content --.required=null --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> RequestBody:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> RequestBody:
     content-json := o["content"]
     content-pointer := pointer["content"]
     content := content-json.map: | key value |
-      MediaType.build value context content-pointer[key]
+      MediaType.parse_ value context content-pointer[key]
     return RequestBody
       --description=o.get "description"
       --content=content
@@ -1445,20 +1503,20 @@ class MediaType extends Extensionable_:
       --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> MediaType:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> MediaType:
     return MediaType
-      --schema=o.get "schema" --if-present=: Schema.build it context pointer["schema"]
+      --schema=o.get "schema" --if-present=: Schema.parse_ it context pointer["schema"]
       --example=o.get "example"
       --examples=o.get "examples" --if-present=: | json-examples/Map |
           examples-pointer := pointer["examples"]
           json-examples.map: | key value |
             example-pointer := examples-pointer[key]
             value.get "\$ref"
-                --if-present=: ReferenceExample.build value context example-pointer
-                --if-absent=: Example.build value context example-pointer
+                --if-present=: Reference.parse_ --kind=Reference.EXAMPLE value context example-pointer
+                --if-absent=: Example.parse_ value context example-pointer
       --encoding=o.get "encoding" --if-present=: | json-encoding/Map |
           encoding-pointer := pointer["encoding"]
-          json-encoding.map: | key value | Encoding.build value context encoding-pointer[key]
+          json-encoding.map: | key value | Encoding.parse_ value context encoding-pointer[key]
       --extensions=Extensionable_.extract-extensions o
 
   to-json -> Map:
@@ -1557,13 +1615,13 @@ class Encoding extends Extensionable_:
       --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> Encoding:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> Encoding:
     headers := o.get "headers" --if-present=: | json-headers/Map |
         headers-pointer := pointer["headers"]
         json-headers.map: | key value |
           value.get "\$ref"
-              --if-present=: ReferenceParameter.build-header value context headers-pointer[key]
-              --if-absent=: Parameter.build-header value context headers-pointer[key]
+              --if-present=: Reference.parse_ --kind=Reference.PARAMETER value context headers-pointer[key]
+              --if-absent=: Parameter.parse-header_ value context headers-pointer[key] --name=key
     return Encoding
       --content-type=o.get "contentType"
       --headers=headers
@@ -1622,12 +1680,12 @@ class Responses extends Extensionable_:
       throw "Responses must contain at least one response"
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> Responses:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> Responses:
     default := o.get "default" --if-present=: | response-json/Map |
       default-pointer := pointer["default"]
       response-json.get "\$ref"
-          --if-present=: ReferenceResponse.build response-json context default-pointer
-          --if-absent=: Response.build response-json context default-pointer
+          --if-present=: Reference.parse_ --kind=Reference.RESPONSE response-json context default-pointer
+          --if-absent=: Response.parse_ response-json context default-pointer
 
     responses := {:}
     o.do: | key/string value/any |
@@ -1641,8 +1699,8 @@ class Responses extends Extensionable_:
         response-json := value
         response-pointer := pointer[code]
         response := response-json.get "\$ref"
-            --if-present=: ReferenceResponse.build response-json context response-pointer
-            --if-absent=: Response.build response-json context response-pointer
+            --if-present=: Reference.parse_ --kind=Reference.RESPONSE response-json context response-pointer
+            --if-absent=: Response.parse_ response-json context response-pointer
         responses[code] = response
 
     return Responses
@@ -1700,29 +1758,31 @@ class Response extends Extensionable_:
   constructor --.description=null --.headers=null --.content --.links=null --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> Response:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> Response:
     headers := o.get "headers" --if-present=: | json-headers/Map |
         headers-pointer := pointer["headers"]
         json-headers.map: | key value |
           value.get "\$ref"
-              --if-present=: ReferenceParameter.build-header value context headers-pointer[key]
-              --if-absent=: Parameter.build-header value context headers-pointer[key]
+              --if-present=: Reference.parse_ --kind=Reference.PARAMETER value context headers-pointer[key]
+              --if-absent=: Parameter.parse-header_ value context headers-pointer[key] --name=key
     content := o.get "content" --if-present=: | json-content/Map |
         content-pointer := pointer["content"]
         json-content.map: | key value |
-          MediaType.build value context content-pointer[key]
+          MediaType.parse_ value context content-pointer[key]
     links := o.get "links" --if-present=: | json-links/Map |
         links-pointer := pointer["links"]
         json-links.map: | key value |
           value.get "\$ref"
-              --if-present=: ReferenceLink.build value context links-pointer[key]
-              --if-absent=: Link.build value context links-pointer[key]
-    return Response
+              --if-present=: Reference.parse_ --kind=Reference.LINK value context links-pointer[key]
+              --if-absent=: Link.parse_ value context links-pointer[key]
+    result := Response
       --description=o["description"]
       --headers=headers
       --content=content
       --links=links
       --extensions=Extensionable_.extract-extensions o
+    context.add-to-store result --pointer=pointer
+    return result
 
   to-json -> Map:
     result := {
@@ -1775,12 +1835,12 @@ class Callback extends Extensionable_:
   constructor --.callbacks --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer:
     callbacks := {:}
     o.do: | key/string value |
       callbacks[RuntimeExpression key] = value.get "\$ref"
-          --if-present=: ReferencePathItem.build value context pointer[key]
-          --if-absent=: PathItem.build value context pointer[key]
+          --if-present=: Reference.parse_ --kind=Reference.PATH-ITEM value context pointer[key]
+          --if-absent=: PathItem.parse_ value context pointer[key]
     return Callback
         --callbacks=callbacks
         --extensions=Extensionable_.extract-extensions o
@@ -1830,7 +1890,7 @@ class Example extends Extensionable_:
       --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> Example:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> Example:
     return Example
       --summary=o.get "summary"
       --description=o.get "description"
@@ -1906,7 +1966,7 @@ class Link extends Extensionable_:
       throw "Link must contain either an operation-ref or an operation-id"
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> Link:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> Link:
     parameters := o.get "parameters" --if-present=: | json-parameters/Map |
         json-parameters.map: | key value |
           runtime := value is string
@@ -1925,7 +1985,7 @@ class Link extends Extensionable_:
       --parameters=parameters
       --request-body=request-body
       --description=o.get "description"
-      --server=o.get "server" --if-present=: Server.build it context pointer["server"]
+      --server=o.get "server" --if-present=: Server.parse_ it context pointer["server"]
       --extensions=Extensionable_.extract-extensions o
 
   to-json -> Map:
@@ -1967,12 +2027,12 @@ class Tag extends Extensionable_:
   constructor --.name --.description=null --.external-docs=null --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> Tag:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> Tag:
     return Tag
       --name=o["name"]
       --description=o.get "description"
       --external-docs=o.get "externalDocs" --if-present=:
-          ExternalDocumentation.build it context pointer["externalDocs"]
+          ExternalDocumentation.parse_ it context pointer["externalDocs"]
       --extensions=Extensionable_.extract-extensions o
 
   to-json -> Map:
@@ -1988,7 +2048,7 @@ class Tag extends Extensionable_:
 A simple object to allow referencing other components in the OpenAPI
   document; internally and externally.
 
-The $ref string value contains a [URI](https://tools.ietf.org/html/rfc3986)
+The $target-uri value contains a [URI](https://tools.ietf.org/html/rfc3986)
   which identifies the location of the value being referenced.
 
 See [Reference Object](https://spec.openapis.org/oas/v3.1.0#relativeReferencesURI)
@@ -1996,12 +2056,25 @@ See [Reference Object](https://spec.openapis.org/oas/v3.1.0#relativeReferencesUR
 
 Note: this class does not allow to be extended.
 */
-abstract class Reference:
+class Reference:
+  static RESPONSE ::= 1
+  static PARAMETER ::= 2
+  static EXAMPLE ::= 3
+  static REQUEST-BODY ::= 4
+  static SECURITY-SCHEME ::= 5
+  static LINK ::= 6
+  static CALLBACK ::= 7
+  static PATH-ITEM ::= 8
+
+  /**
+  The type of the referenced object.
+  */
+  kind/int
+
   /**
   The reference identifier.
-  Must be in the form of a URI.
   */
-  ref/string
+  target-uri/UriReference
 
   /**
   A short summary.
@@ -2020,122 +2093,60 @@ abstract class Reference:
   */
   description/string?
 
-  constructor --.ref --.summary=null --.description=null:
+  resolved_/any := null
 
-  abstract resolved -> any
+  constructor --.kind --.target-uri --.summary=null --.description=null:
+
+  static parse_ o/Map context/BuildContext pointer/JsonPointer --kind/int -> Reference:
+    ref := o["\$ref"]
+    target-uri := UriReference.parse ref
+    reference := Reference
+        --kind=kind
+        --target-uri=target-uri
+        --summary=o.get "summary"
+        --description=o.get "description"
+    context.references.add reference
+    return reference
+
+  response -> Response:
+    if kind != RESPONSE: throw "Reference is not a response"
+    return resolved_
+
+  parameter -> Parameter:
+    if kind != PARAMETER: throw "Reference is not a parameter"
+    return resolved_
+
+  example -> Example:
+    if kind != EXAMPLE: throw "Reference is not an example"
+    return resolved_
+
+  request-body -> RequestBody:
+    if kind != REQUEST-BODY: throw "Reference is not a request body"
+    return resolved_
+
+  security-scheme -> SecurityScheme:
+    if kind != SECURITY-SCHEME: throw "Reference is not a security scheme"
+    return resolved_
+
+  link -> Link:
+    if kind != LINK: throw "Reference is not a link"
+    return resolved_
+
+  callback -> Callback:
+    if kind != CALLBACK: throw "Reference is not a callback"
+    return resolved_
+
+  path-item -> PathItem:
+    if kind != PATH-ITEM: throw "Reference is not a path item"
+    return resolved_
 
   to-json -> Map:
     result := {
-      "\$ref": ref,
+      "\$ref": target-uri.to-string,
     }
     if summary: result["summary"] = summary
     if description: result["description"] = description
     return result
-
-class ReferenceResponse extends Reference:
-  resolved/Response? := null
-
-  constructor --ref/string --summary/string? --description/string?:
-    super --ref=ref --summary=summary --description=description
-
-  static build o/Map context/BuildContext pointer/JsonPointer -> Reference:
-    return ReferenceResponse
-      --ref=o["\$ref"]
-      --summary=o.get "summary"
-      --description=o.get "description"
-
-class ReferenceParameter extends Reference:
-  resolved/Parameter? := null
-  is-header/bool
-
-  constructor --ref/string --summary/string? --description/string? --.is-header:
-    super --ref=ref --summary=summary --description=description
-
-  static build o/Map context/BuildContext pointer/JsonPointer -> Reference:
-    return ReferenceParameter
-      --ref=o["\$ref"]
-      --summary=o.get "summary"
-      --description=o.get "description"
-      --is-header=false
-
-  static build-header o/Map context/BuildContext pointer/JsonPointer -> Reference:
-    return ReferenceParameter
-      --ref=o["\$ref"]
-      --summary=o.get "summary"
-      --description=o.get "description"
-      --is-header
-
-class ReferenceExample extends Reference:
-  resolved/Example? := null
-
-  constructor --ref/string --summary/string? --description/string?:
-    super --ref=ref --summary=summary --description=description
-
-  static build o/Map context/BuildContext pointer/JsonPointer -> Reference:
-    return ReferenceExample
-      --ref=o["\$ref"]
-      --summary=o.get "summary"
-      --description=o.get "description"
-
-class ReferenceRequestBody extends Reference:
-  resolved/RequestBody? := null
-
-  constructor --ref/string --summary/string? --description/string?:
-    super --ref=ref --summary=summary --description=description
-
-  static build o/Map context/BuildContext pointer/JsonPointer -> Reference:
-    return ReferenceRequestBody
-      --ref=o["\$ref"]
-      --summary=o.get "summary"
-      --description=o.get "description"
-
-class ReferenceSecurityScheme extends Reference:
-  resolved/SecurityScheme? := null
-
-  constructor --ref/string --summary/string? --description/string?:
-    super --ref=ref --summary=summary --description=description
-
-  static build o/Map context/BuildContext pointer/JsonPointer -> Reference:
-    return ReferenceSecurityScheme
-      --ref=o["\$ref"]
-      --summary=o.get "summary"
-      --description=o.get "description"
-
-class ReferenceLink extends Reference:
-  resolved/Link? := null
-
-  constructor --ref/string --summary/string? --description/string?:
-    super --ref=ref --summary=summary --description=description
-
-  static build o/Map context/BuildContext pointer/JsonPointer -> Reference:
-    return ReferenceLink
-      --ref=o["\$ref"]
-      --summary=o.get "summary"
-      --description=o.get "description"
-
-class ReferenceCallback extends Reference:
-  resolved/Callback? := null
-
-  constructor --ref/string --summary/string? --description/string?:
-    super --ref=ref --summary=summary --description=description
-
-  static build o/Map context/BuildContext pointer/JsonPointer -> Reference:
-    return ReferenceCallback
-      --ref=o["\$ref"]
-      --summary=o.get "summary"
-      --description=o.get "description"
-
-class ReferencePathItem extends Reference:
-  resolved/PathItem? := null
-
-  constructor --ref/string --summary/string? --description/string?:
-    super --ref=ref --summary=summary --description=description
-
-  static build o/Map context/BuildContext pointer/JsonPointer -> Reference:
-    return ReferencePathItem
-      --ref=o["\$ref"]
-      --summary=o.get "summary"
-      --description=o.get "description"
 
 class Schema:
   original-json_/Map
@@ -2144,8 +2155,12 @@ class Schema:
   constructor --original-json/Map --.schema:
     this.original-json_ = original-json
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> Schema:
-    schema := json-schema.parse o --context=context.json-schema-context
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> Schema:
+    schema := json-schema.parse o
+        --context=context.json-schema-context
+        --json-pointer=pointer
+        --base-uri=context.uri
+    context.add-to-store schema --pointer=pointer
     return Schema --original-json=o --schema=schema
 
   to-json -> Map:
@@ -2187,13 +2202,13 @@ class SecurityScheme extends Extensionable_:
   constructor --.type --.description=null --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> SecurityScheme:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> SecurityScheme:
     type := o["type"]
-    if type == API-KEY: return SecuritySchemeApiKey.build o context pointer
-    if type == HTTP: return SecuritySchemeHttp.build o context pointer
-    if type == MUTUAL-TLS: return SecuritySchemeMutualTls.build o context pointer
-    if type == OAUTH2: return SecuritySchemeOAuth2.build o context pointer
-    if type == OPENID-CONNECT: return SecuritySchemeOpenIdConnect.build o context pointer
+    if type == API-KEY: return SecuritySchemeApiKey.parse_ o context pointer
+    if type == HTTP: return SecuritySchemeHttp.parse_ o context pointer
+    if type == MUTUAL-TLS: return SecuritySchemeMutualTls.parse_ o context pointer
+    if type == OAUTH2: return SecuritySchemeOAuth2.parse_ o context pointer
+    if type == OPENID-CONNECT: return SecuritySchemeOpenIdConnect.parse_ o context pointer
     throw "Unknown security scheme type: $type"
 
   to-json -> Map:
@@ -2225,7 +2240,7 @@ class SecuritySchemeApiKey extends SecurityScheme:
   constructor --.name --.in --description/string?=null --extensions/Map?=null:
     super --type=SecurityScheme.API-KEY --description=description --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> SecuritySchemeApiKey:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> SecuritySchemeApiKey:
     return SecuritySchemeApiKey
       --name=o["name"]
       --in=o["in"]
@@ -2259,7 +2274,7 @@ class SecuritySchemeHttp extends SecurityScheme:
   constructor --.scheme --.bearer-format=null --description/string?=null --extensions/Map?=null:
     super --type=SecurityScheme.HTTP --description=description --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> SecuritySchemeHttp:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> SecuritySchemeHttp:
     return SecuritySchemeHttp
       --scheme=o["scheme"]
       --bearer-format=o.get "bearerFormat"
@@ -2276,7 +2291,7 @@ class SecuritySchemeMutualTls extends SecurityScheme:
   constructor --description/string?=null --extensions/Map?=null:
     super --type=SecurityScheme.MUTUAL-TLS --description=description --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> SecuritySchemeMutualTls:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> SecuritySchemeMutualTls:
     return SecuritySchemeMutualTls
       --description=o.get "description"
       --extensions=Extensionable_.extract-extensions o
@@ -2293,9 +2308,9 @@ class SecuritySchemeOAuth2 extends SecurityScheme:
   constructor --.flows --description/string?=null --extensions/Map?=null:
     super --type=SecurityScheme.OAUTH2 --description=description --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> SecuritySchemeOAuth2:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> SecuritySchemeOAuth2:
     return SecuritySchemeOAuth2
-      --flows=OAuthFlows.build o["flows"] context pointer["flows"]
+      --flows=OAuthFlows.parse_ o["flows"] context pointer["flows"]
       --description=o.get "description"
       --extensions=Extensionable_.extract-extensions o
 
@@ -2314,7 +2329,7 @@ class SecuritySchemeOpenIdConnect extends SecurityScheme:
   constructor --.open-id-connect-url --description/string?=null --extensions/Map?=null:
     super --type=SecurityScheme.OPENID-CONNECT --description=description --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> SecuritySchemeOpenIdConnect:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> SecuritySchemeOpenIdConnect:
     return SecuritySchemeOpenIdConnect
       --open-id-connect-url=o["openIdConnectUrl"]
       --description=o.get "description"
@@ -2358,16 +2373,16 @@ class OAuthFlows extends Extensionable_:
       --extensions/Map?=null:
     super --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> OAuthFlows:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> OAuthFlows:
     return OAuthFlows
       --implicit=o.get "implicit" --if-present=:
-          OAuthFlowImplicit.build o["implicit"] context pointer["implicit"]
+          OAuthFlowImplicit.parse_ o["implicit"] context pointer["implicit"]
       --password=o.get "password" --if-present=:
-          OAuthFlowPassword.build o["password"] context pointer["password"]
+          OAuthFlowPassword.parse_ o["password"] context pointer["password"]
       --client-credentials=o.get "clientCredentials" --if-present=:
-          OAuthFlowClientCredentials.build o["clientCredentials"] context pointer["clientCredentials"]
+          OAuthFlowClientCredentials.parse_ o["clientCredentials"] context pointer["clientCredentials"]
       --authorization-code=o.get "authorizationCode" --if-present=:
-          OAuthFlowAuthorizationCode.build o["authorizationCode"] context pointer["authorizationCode"]
+          OAuthFlowAuthorizationCode.parse_ o["authorizationCode"] context pointer["authorizationCode"]
       --extensions=Extensionable_.extract-extensions o
 
   to-json -> Map:
@@ -2417,7 +2432,7 @@ class OAuthFlowImplicit extends OAuthFlow:
   constructor --.authorization-url --scopes/Map --refresh-url/string?=null --extensions/Map?=null:
     super --scopes=scopes --refresh-url=refresh-url --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> OAuthFlowImplicit:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> OAuthFlowImplicit:
     return OAuthFlowImplicit
       --authorization-url=o["authorizationUrl"]
       --scopes=o["scopes"]
@@ -2440,7 +2455,7 @@ class OAuthFlowPassword extends OAuthFlow:
   constructor --.token-url --scopes/Map --refresh-url/string?=null --extensions/Map?=null:
     super --scopes=scopes --refresh-url=refresh-url --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> OAuthFlowPassword:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> OAuthFlowPassword:
     return OAuthFlowPassword
       --token-url=o["tokenUrl"]
       --scopes=o["scopes"]
@@ -2463,7 +2478,7 @@ class OAuthFlowClientCredentials extends OAuthFlow:
   constructor --.token-url --scopes/Map --refresh-url/string?=null --extensions/Map?=null:
     super --scopes=scopes --refresh-url=refresh-url --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> OAuthFlowClientCredentials:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> OAuthFlowClientCredentials:
     return OAuthFlowClientCredentials
       --token-url=o["tokenUrl"]
       --scopes=o["scopes"]
@@ -2493,7 +2508,7 @@ class OAuthFlowAuthorizationCode extends OAuthFlow:
   constructor --.authorization-url --.token-url --scopes/Map --refresh-url/string?=null --extensions/Map?=null:
     super --scopes=scopes --refresh-url=refresh-url --extensions=extensions
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> OAuthFlowAuthorizationCode:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> OAuthFlowAuthorizationCode:
     return OAuthFlowAuthorizationCode
       --authorization-url=o["authorizationUrl"]
       --token-url=o["tokenUrl"]
@@ -2527,7 +2542,7 @@ class SecurityRequirement:
 
   constructor --.requirements/Map:
 
-  static build o/Map context/BuildContext pointer/JsonPointer -> SecurityRequirement:
+  static parse_ o/Map context/BuildContext pointer/JsonPointer -> SecurityRequirement:
     return SecurityRequirement --requirements=o
 
   to-json -> Map:

@@ -60,7 +60,7 @@ INFO-MINIMAL ::= {
 context := BuildContext
 
 test-info:
-  info := Info.build INFO-EXAMPLE context JsonPointer
+  info := Info.parse_ INFO-EXAMPLE context JsonPointer
   expect-equals "Sample Pet Store App" info.title
   expect-equals "A pet store manager." info.summary
   expect-equals "This is a sample server for a pet store." info.description
@@ -77,7 +77,7 @@ test-info:
   json := info.to-json
   expect-structural-equals INFO-EXAMPLE json
 
-  info = Info.build INFO-MINIMAL context JsonPointer
+  info = Info.parse_ INFO-MINIMAL context JsonPointer
   expect-equals "Sample Pet Store App" info.title
   expect-equals "1.0.1" info.version
   expect_null info.summary
@@ -100,7 +100,7 @@ CONTACT-EXAMPLE ::= {
 CONTACT-MINIMAL ::= {:}
 
 test-contact:
-  contact := Contact.build CONTACT-EXAMPLE context JsonPointer
+  contact := Contact.parse_ CONTACT-EXAMPLE context JsonPointer
   expect-equals "API Support" contact.name
   expect-equals "https://www.example.com/support" contact.url
   expect-equals "support@example.com" contact.email
@@ -109,7 +109,7 @@ test-contact:
   expect-structural-equals CONTACT-EXAMPLE json
 
 
-  contact = Contact.build CONTACT-MINIMAL context JsonPointer
+  contact = Contact.parse_ CONTACT-MINIMAL context JsonPointer
   expect_null contact.name
   expect_null contact.url
   expect_null contact.email
@@ -125,7 +125,7 @@ LICENSE-EXAMPLE ::= {
 }
 
 test-license:
-  license := License.build LICENSE-EXAMPLE context JsonPointer
+  license := License.parse_ LICENSE-EXAMPLE context JsonPointer
   expect-equals "Apache 2.0" license.name
   expect-equals "Apache-2.0" license.identifier
 
@@ -178,19 +178,19 @@ SERVER-VARIABLE-EXAMPLE ::= {
 }
 
 test-server:
-  server := Server.build SERVER-EXAMPLE context JsonPointer
+  server := Server.parse_ SERVER-EXAMPLE context JsonPointer
   expect-equals "https://development.gigantic-server.com/v1" server.url
   expect-equals "Development server" server.description
 
   json := server.to-json
   expect-structural-equals SERVER-EXAMPLE json
 
-  servers := SERVER-LIST-EXAMPLE.map: Server.build it context JsonPointer
+  servers := SERVER-LIST-EXAMPLE.map: Server.parse_ it context JsonPointer
   expect-equals 3 servers.size
   json-list := servers.map: it.to-json
   expect-structural-equals SERVER-LIST-EXAMPLE json-list
 
-  server = Server.build SERVER-VARIABLE-EXAMPLE context JsonPointer
+  server = Server.parse_ SERVER-VARIABLE-EXAMPLE context JsonPointer
   expect-equals "https://{username}.gigantic-server.com:{port}/{basePath}" server.url
   expect-equals "The production API server" server.description
   expect-equals 3 server.variables.size
@@ -313,7 +313,7 @@ COMPONENTS-EXAMPLE ::= {
 }
 
 test-components:
-  components := Components.build COMPONENTS-EXAMPLE context JsonPointer
+  components := Components.parse_ COMPONENTS-EXAMPLE context JsonPointer
   expect-equals 3 components.schemas.size
   ["GeneralError", "Category", "Tag"].do: expect (components.schemas.contains it)
 
@@ -383,7 +383,7 @@ PATHS-EXAMPLE ::= {
 }
 
 test-paths:
-  paths := Paths.build PATHS-EXAMPLE context JsonPointer
+  paths := Paths.parse_ PATHS-EXAMPLE context JsonPointer
   expect-equals 1 paths.paths.size
   expect-equals "/pets" paths.paths.keys.first
   path-item/PathItem := paths.paths["/pets"]
@@ -446,7 +446,7 @@ PATH-ITEM-EXAMPLE ::= {
 }
 
 test-path-item:
-  path-item := PathItem.build PATH-ITEM-EXAMPLE context JsonPointer
+  path-item := PathItem.parse_ PATH-ITEM-EXAMPLE context JsonPointer
   get := path-item.get
   expect-equals "Returns pets based on ID" get.description
   expect-equals "Find pets by ID" get.summary
@@ -535,7 +535,7 @@ OPERATION-EXAMPLE ::= {
 }
 
 test-operation:
-  operation := Operation.build OPERATION-EXAMPLE context JsonPointer
+  operation := Operation.parse_ OPERATION-EXAMPLE context JsonPointer
   expect-equals 1 operation.tags.size
   tag/string := operation.tags.first
   expect-equals "pet" tag
@@ -584,18 +584,18 @@ EXTERNAL-DOCUMENTATION-EXAMPLE ::= {
 }
 
 test-external-documenation:
-  documentation := ExternalDocumentation.build EXTERNAL-DOCUMENTATION-EXAMPLE context JsonPointer
+  documentation := ExternalDocumentation.parse_ EXTERNAL-DOCUMENTATION-EXAMPLE context JsonPointer
   expect-equals "Find more info here" documentation.description
   expect-equals "https://example.com" documentation.url
 
   json := documentation.to-json
   expect-structural-equals EXTERNAL-DOCUMENTATION-EXAMPLE json
 
-  expect-throw "key 'url' not found": documentation = ExternalDocumentation.build {:} context JsonPointer
-  expect-throw "key 'url' not found": documentation = ExternalDocumentation.build {
+  expect-throw "key 'url' not found": documentation = ExternalDocumentation.parse_ {:} context JsonPointer
+  expect-throw "key 'url' not found": documentation = ExternalDocumentation.parse_ {
     "description": "Find more info here",
   }  context JsonPointer
-  documentation = ExternalDocumentation.build {
+  documentation = ExternalDocumentation.parse_ {
     "url": "https://example.com"
   } context JsonPointer
   expect_null documentation.description
@@ -617,7 +617,7 @@ PARAMETER-EXAMPLES ::= {
 }
 
 test-parameter:
-  parameter := Parameter.build PARAMETER-EXAMPLES context JsonPointer
+  parameter := Parameter.parse_ PARAMETER-EXAMPLES context JsonPointer
   expect-equals "token" parameter.name
   expect-equals "header" parameter.in
   expect-equals "token to be passed as a header" parameter.description
@@ -687,7 +687,7 @@ REQUEST-BODY2-EXAMPLE ::= {
 }
 
 test-request-body:
-  request-body := RequestBody.build REQUEST-BODY-EXAMPLE context JsonPointer
+  request-body := RequestBody.parse_ REQUEST-BODY-EXAMPLE context JsonPointer
   expect-equals "user to add to the system" request-body.description
   content := request-body.content
   expect-equals 4 content.size
@@ -722,7 +722,7 @@ test-request-body:
   json := request-body.to-json
   expect-structural-equals REQUEST-BODY-EXAMPLE json
 
-  request-body = RequestBody.build REQUEST-BODY2-EXAMPLE context JsonPointer
+  request-body = RequestBody.parse_ REQUEST-BODY2-EXAMPLE context JsonPointer
   expect-equals "user to add to the system" request-body.description
   expect request-body.required
   content = request-body.content
@@ -768,7 +768,7 @@ MEDIA-TYPE-EXAMPLE ::= {
 }
 
 test-media-type:
-  media-type := MediaType.build MEDIA-TYPE-EXAMPLE["application/json"] context JsonPointer
+  media-type := MediaType.parse_ MEDIA-TYPE-EXAMPLE["application/json"] context JsonPointer
   expect-equals 3 media-type.examples.size
   example/Example := media-type.examples["cat"]
   expect-equals "An example of a cat" example.summary
@@ -789,7 +789,7 @@ test-media-type:
     "breed": "Mixed",
   } example.value
   reference-example/Reference := media-type.examples["frog"]
-  expect-equals "#/components/examples/frog-example" reference-example.ref
+  expect-equals "#/components/examples/frog-example" reference-example.target-uri.to-string
 
   json := media-type.to-json
   expect-structural-equals MEDIA-TYPE-EXAMPLE["application/json"] json
@@ -811,14 +811,14 @@ ENCODING-EXAMPLE2 ::= {
 }
 
 test-encoding:
-  encoding := Encoding.build ENCODING-EXAMPLE1 context JsonPointer
+  encoding := Encoding.parse_ ENCODING-EXAMPLE1 context JsonPointer
   expect-equals "application/xml; charset=utf-8" encoding.content-type
   expect-null encoding.headers
 
   json := encoding.to-json
   expect-structural-equals ENCODING-EXAMPLE1 json
 
-  encoding = Encoding.build ENCODING-EXAMPLE2 context JsonPointer
+  encoding = Encoding.parse_ ENCODING-EXAMPLE2 context JsonPointer
   expect-equals "image/png, image/jpeg" encoding.content-type
   expect-equals 1 encoding.headers.size
   header/Parameter := encoding.headers["X-Rate-Limit-Limit"]
@@ -852,7 +852,7 @@ RESPONSES-EXAMPLE ::= {
 }
 
 test-responses:
-  responses := Responses.build RESPONSES-EXAMPLE context JsonPointer
+  responses := Responses.parse_ RESPONSES-EXAMPLE context JsonPointer
   expect-equals 1 responses.responses.size
   response-200 := responses.responses["200"]
   expect-equals "a pet to be returned" response-200.description
@@ -928,7 +928,7 @@ RESPONSE-EXAMPLE4 ::= {
 }
 
 test-response:
-  response := Response.build RESPONSE-EXAMPLE1 context JsonPointer
+  response := Response.parse_ RESPONSE-EXAMPLE1 context JsonPointer
   expect-equals "A complex object array response" response.description
   expect-equals 1 response.content.size
   expect-equals "application/json" response.content.keys.first
@@ -936,7 +936,7 @@ test-response:
   json := response.to-json
   expect-structural-equals RESPONSE-EXAMPLE1 json
 
-  response = Response.build RESPONSE-EXAMPLE2 context JsonPointer
+  response = Response.parse_ RESPONSE-EXAMPLE2 context JsonPointer
   expect-equals "A simple string response" response.description
   expect-equals 1 response.content.size
   expect-equals "text/plain" response.content.keys.first
@@ -944,7 +944,7 @@ test-response:
   json = response.to-json
   expect-structural-equals RESPONSE-EXAMPLE2 json
 
-  response = Response.build RESPONSE-EXAMPLE3 context JsonPointer
+  response = Response.parse_ RESPONSE-EXAMPLE3 context JsonPointer
   expect-equals "A simple string response" response.description
   expect-equals 1 response.content.size
   expect-equals "text/plain" response.content.keys.first
@@ -986,7 +986,7 @@ CALLBACK-EXAMPLE ::= {
 }
 
 test-callback:
-  callback := Callback.build CALLBACK-EXAMPLE context JsonPointer
+  callback := Callback.parse_ CALLBACK-EXAMPLE context JsonPointer
   expect-equals 1 callback.callbacks.size
   runtime-expression := callback.callbacks.keys.first
   expect-equals "{\$request.query.queryUrl}" runtime-expression.expression
@@ -1076,7 +1076,7 @@ EXAMPLE-RESPONSE-TEST ::= {
 }
 
 test-example:
-  request-body := RequestBody.build EXAMPLE-REQUEST-BODY-TEST context JsonPointer
+  request-body := RequestBody.parse_ EXAMPLE-REQUEST-BODY-TEST context JsonPointer
   expect-equals 3 request-body.content.size
   content := request-body.content["application/json"]
   examples := content.examples
@@ -1103,15 +1103,15 @@ test-example:
   json := request-body.to-json
   expect-structural-equals EXAMPLE-REQUEST-BODY-TEST json
 
-  parameter := Parameter.build EXAMPLE-PARAMETERS-TEST context JsonPointer
+  parameter := Parameter.parse_ EXAMPLE-PARAMETERS-TEST context JsonPointer
   expect-equals 1 parameter.examples.size
   reference-example/Reference := parameter.examples["zip-example"]
-  expect-equals "#/components/examples/zip-example" reference-example.ref
+  expect-equals "#/components/examples/zip-example" reference-example.target-uri.to-string
 
   json = parameter.to-json
   expect-structural-equals EXAMPLE-PARAMETERS-TEST json
 
-  operation := Operation.build EXAMPLE-RESPONSE-TEST context JsonPointer
+  operation := Operation.parse_ EXAMPLE-RESPONSE-TEST context JsonPointer
   responses := operation.responses
   expect-equals 1 responses.responses.size
   response-200 := responses.responses["200"]
@@ -1119,7 +1119,7 @@ test-example:
   examples = response-content.examples
   expect-equals 1 examples.size
   reference-example = examples["confirmation-success"]
-  expect-equals "#/components/examples/confirmation-success" reference-example.ref
+  expect-equals "#/components/examples/confirmation-success" reference-example.target-uri.to-string
 
   json = operation.to-json
   expect-structural-equals EXAMPLE-RESPONSE-TEST json
@@ -1225,7 +1225,7 @@ LINK-EXAMPLE4 ::= {
 }
 
 test-link:
-  paths := Paths.build LINK-EXAMPLE1["paths"] context JsonPointer
+  paths := Paths.parse_ LINK-EXAMPLE1["paths"] context JsonPointer
   // Only looking at the links entry.
   links := paths.paths["/users/{id}"].get.responses.responses["200"].links
   expect-equals 1 links.size
@@ -1238,7 +1238,7 @@ test-link:
   json := paths.to-json
   expect-structural-equals LINK-EXAMPLE1["paths"] json
 
-  components := Components.build LINK-EXAMPLE2 context JsonPointer
+  components := Components.parse_ LINK-EXAMPLE2 context JsonPointer
   links = components.links
   expect-equals 1 links.size
   link = links["address"]
@@ -1250,7 +1250,7 @@ test-link:
   json = components.to-json
   expect-structural-equals LINK-EXAMPLE2 json
 
-  components = Components.build LINK-EXAMPLE3 context JsonPointer
+  components = Components.parse_ LINK-EXAMPLE3 context JsonPointer
   links = components.links
   expect-equals 1 links.size
   link = links["UserRepositories"]
@@ -1262,7 +1262,7 @@ test-link:
   json = components.to-json
   expect-structural-equals LINK-EXAMPLE3 json
 
-  components = Components.build LINK-EXAMPLE4 context JsonPointer
+  components = Components.parse_ LINK-EXAMPLE4 context JsonPointer
   links = components.links
   expect-equals 1 links.size
   link = links["UserRepositories"]
@@ -1282,7 +1282,7 @@ HEADER-EXAMPLE ::= {
 }
 
 test-header:
-  header := Parameter.build-header HEADER-EXAMPLE context JsonPointer
+  header := Parameter.parse-header_ HEADER-EXAMPLE context JsonPointer
   expect header.is-header
   expect-equals "" header.name
   expect-equals Parameter.HEADER header.in
@@ -1297,7 +1297,7 @@ TAG-EXAMPLE ::= {
 }
 
 test-tag:
-  tag := Tag.build TAG-EXAMPLE context JsonPointer
+  tag := Tag.parse_ TAG-EXAMPLE context JsonPointer
   expect-equals "pet" tag.name
   expect-equals "Pets operations" tag.description
 
@@ -1317,24 +1317,27 @@ REFERENCE-EMBEDDED-SCHEMA-EXAMPLE ::= {
 }
 
 test-reference:
-  reference := Reference.build REFERENCE-OBJECT-EXAMPLE context JsonPointer
-  expect-equals "#/components/schemas/Pet" reference.ref
+  // TODO(florian): we are using the wrong kind here.
+  // As long as we don't parse that should be fine.
+  // Schema references are handled by the json-schema lib, so we don't actually see them.
+  reference := Reference.parse_ --kind=Reference.LINK REFERENCE-OBJECT-EXAMPLE context JsonPointer
+  expect-equals "#/components/schemas/Pet" reference.target-uri.to-string
   expect-null reference.description
   expect-null reference.summary
 
   json := reference.to-json
   expect-structural-equals REFERENCE-OBJECT-EXAMPLE json
 
-  reference = Reference.build REFERENCE-SCHEMA-DOCUMENT-EXAMPLE context JsonPointer
-  expect-equals "Pet.json" reference.ref
+  reference = Reference.parse_ --kind=Reference.LINK REFERENCE-SCHEMA-DOCUMENT-EXAMPLE context JsonPointer
+  expect-equals "Pet.json" reference.target-uri.to-string
   expect-null reference.description
   expect-null reference.summary
 
   json = reference.to-json
   expect-structural-equals REFERENCE-SCHEMA-DOCUMENT-EXAMPLE json
 
-  reference = Reference.build REFERENCE-EMBEDDED-SCHEMA-EXAMPLE context JsonPointer
-  expect-equals "definitions.json#/Pet" reference.ref
+  reference = Reference.parse_ --kind=Reference.LINK REFERENCE-EMBEDDED-SCHEMA-EXAMPLE context JsonPointer
+  expect-equals "definitions.json#/Pet" reference.target-uri.to-string
   expect-null reference.description
   expect-null reference.summary
 
@@ -1368,8 +1371,8 @@ SCHEMA-MODEL-EXAMPLE ::= {
 
 test-schema:
   // Just make sure that the schemas can be parsed.
-  schema := Schema.build SCHEMA-PRIMITIVE-EXAMPLE context JsonPointer
-  schema = Schema.build SCHEMA-MODEL-EXAMPLE context JsonPointer
+  schema := Schema.parse_ SCHEMA-PRIMITIVE-EXAMPLE context JsonPointer
+  schema = Schema.parse_ SCHEMA-MODEL-EXAMPLE context JsonPointer
 
 SECURITY-SCHEME-BASIC-EXAMPLE ::= {
   "type": "http",
@@ -1402,7 +1405,7 @@ SECURITY-SCHEME-OAUTH2-EXAMPLE ::= {
 }
 
 test-security-scheme:
-  security-scheme := SecurityScheme.build SECURITY-SCHEME-BASIC-EXAMPLE context JsonPointer
+  security-scheme := SecurityScheme.parse_ SECURITY-SCHEME-BASIC-EXAMPLE context JsonPointer
   expect-equals SecurityScheme.HTTP security-scheme.type
   security-scheme-http := security-scheme as SecuritySchemeHttp
   expect-equals "basic" security-scheme-http.scheme
@@ -1410,7 +1413,7 @@ test-security-scheme:
   json := security-scheme.to-json
   expect-structural-equals SECURITY-SCHEME-BASIC-EXAMPLE json
 
-  security-scheme = SecurityScheme.build SECURITY-SCHEME-API-KEY-EXAMPLE context JsonPointer
+  security-scheme = SecurityScheme.parse_ SECURITY-SCHEME-API-KEY-EXAMPLE context JsonPointer
   expect-equals SecurityScheme.API-KEY security-scheme.type
   security-scheme-api-key := security-scheme as SecuritySchemeApiKey
   expect-equals "api_key" security-scheme-api-key.name
@@ -1419,7 +1422,7 @@ test-security-scheme:
   json = security-scheme.to-json
   expect-structural-equals SECURITY-SCHEME-API-KEY-EXAMPLE json
 
-  security-scheme = SecurityScheme.build SECURITY-SCHEME-JWT-BEARER-EAMPLE context JsonPointer
+  security-scheme = SecurityScheme.parse_ SECURITY-SCHEME-JWT-BEARER-EAMPLE context JsonPointer
   expect-equals SecurityScheme.HTTP security-scheme.type
   security-scheme-http = security-scheme as SecuritySchemeHttp
   expect-equals "bearer" security-scheme-http.scheme
@@ -1428,7 +1431,7 @@ test-security-scheme:
   json = security-scheme.to-json
   expect-structural-equals SECURITY-SCHEME-JWT-BEARER-EAMPLE json
 
-  security-scheme = SecurityScheme.build SECURITY-SCHEME-OAUTH2-EXAMPLE context JsonPointer
+  security-scheme = SecurityScheme.parse_ SECURITY-SCHEME-OAUTH2-EXAMPLE context JsonPointer
   expect-equals SecurityScheme.OAUTH2 security-scheme.type
   security-scheme-oauth2 := security-scheme as SecuritySchemeOAuth2
   flows := security-scheme-oauth2.flows
@@ -1465,7 +1468,7 @@ OAUTH-FLOW-EXAMPLE ::= {
 }
 
 test-oauth-flow:
-  scheme := SecurityScheme.build OAUTH-FLOW-EXAMPLE context JsonPointer
+  scheme := SecurityScheme.parse_ OAUTH-FLOW-EXAMPLE context JsonPointer
   oauth-scheme := scheme as SecuritySchemeOAuth2
   implicit := oauth-scheme.flows.implicit
   expect-equals "https://example.com/api/oauth/dialog" implicit.authorization-url
@@ -1510,7 +1513,7 @@ SECURITY-OPTIONAL-OAUTH-EXAMPLE ::= {
 }
 
 test-security-requirements:
-  requirement := SecurityRequirement.build SECURITY-NON-OAUTH-EXAMPLE context JsonPointer
+  requirement := SecurityRequirement.parse_ SECURITY-NON-OAUTH-EXAMPLE context JsonPointer
   expect-structural-equals {
     "api_key": [],
   } requirement.requirements
@@ -1518,7 +1521,7 @@ test-security-requirements:
   json := requirement.to-json
   expect-structural-equals SECURITY-NON-OAUTH-EXAMPLE json
 
-  requirement = SecurityRequirement.build SECURITY-OAUTH-EXAMPLE context JsonPointer
+  requirement = SecurityRequirement.parse_ SECURITY-OAUTH-EXAMPLE context JsonPointer
   expect-structural-equals {
     "petstore_auth": [
       "write:pets",
@@ -1529,7 +1532,7 @@ test-security-requirements:
   json = requirement.to-json
   expect-structural-equals SECURITY-OAUTH-EXAMPLE json
 
-  operation := Operation.build SECURITY-OPTIONAL-OAUTH-EXAMPLE context JsonPointer
+  operation := Operation.parse_ SECURITY-OPTIONAL-OAUTH-EXAMPLE context JsonPointer
   securities := operation.security
   expect-equals 2 securities.size
   requirements/SecurityRequirement := securities[0]
