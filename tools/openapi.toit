@@ -82,7 +82,7 @@ resolve openapi/OpenApi context/BuildContext:
       resolved-uri := ref.target-uri.resolve --base=base-uri
       target := store.get resolved-uri
       if not target:
-        throw "Reference not found: $ref"
+        throw "Reference not found: $ref.target-uri"
       ref.resolved_ = target
 
 /** The root object of the OpenAPI document. */
@@ -1361,31 +1361,33 @@ class Parameter extends Extensionable_:
       context/BuildContext
       pointer/JsonPointer
   :
-    return Parameter
-      --name=name
-      --in=in
-      --description=o.get "description"
-      --required=o.get "required"
-      --deprecated=o.get "deprecated"
-      --allow-empty-value=o.get "allowEmptyValue"
-      --style=o.get "style"
-      --explode=o.get "explode"
-      --allow-reserved=o.get "allowReserved"
-      --schema=o.get "schema" --if-present=: Schema.parse_ it context pointer["schema"]
-      --example=o.get "example"
-      --examples=o.get "examples" --if-present=: | json-examples/Map |
-          examples-pointer := pointer["examples"]
-          json-examples.map: | example-key/string value/Map |
-            example-pointer := examples-pointer[example-key]
-            value.get "\$ref"
-                --if-present=: Reference.parse_ --kind=Reference.EXAMPLE value context example-pointer
-                --if-absent=: Example.parse_ value context example-pointer
-      --content=o.get "content" --if-present=: | json-content/Map |
-          content-pointer := pointer["content"]
-          json-content.map: | key/string value/Map |
-            MediaType.parse_ value context content-pointer[key]
-      --is-header=is-header
-      --extensions=Extensionable_.extract-extensions o
+    result := Parameter
+        --name=name
+        --in=in
+        --description=o.get "description"
+        --required=o.get "required"
+        --deprecated=o.get "deprecated"
+        --allow-empty-value=o.get "allowEmptyValue"
+        --style=o.get "style"
+        --explode=o.get "explode"
+        --allow-reserved=o.get "allowReserved"
+        --schema=o.get "schema" --if-present=: Schema.parse_ it context pointer["schema"]
+        --example=o.get "example"
+        --examples=o.get "examples" --if-present=: | json-examples/Map |
+            examples-pointer := pointer["examples"]
+            json-examples.map: | example-key/string value/Map |
+              example-pointer := examples-pointer[example-key]
+              value.get "\$ref"
+                  --if-present=: Reference.parse_ --kind=Reference.EXAMPLE value context example-pointer
+                  --if-absent=: Example.parse_ value context example-pointer
+        --content=o.get "content" --if-present=: | json-content/Map |
+            content-pointer := pointer["content"]
+            json-content.map: | key/string value/Map |
+              MediaType.parse_ value context content-pointer[key]
+        --is-header=is-header
+        --extensions=Extensionable_.extract-extensions o
+    context.add-to-store result --pointer=pointer
+    return result
 
   to-json -> Map:
     result := {:}
@@ -2099,7 +2101,8 @@ class Reference:
 
   static parse_ o/Map context/BuildContext pointer/JsonPointer --kind/int -> Reference:
     ref := o["\$ref"]
-    target-uri := UriReference.parse ref
+    normalized := (UriReference.parse ref).normalize
+    target-uri := normalized.resolve --base=context.uri
     reference := Reference
         --kind=kind
         --target-uri=target-uri
