@@ -1282,7 +1282,7 @@ HEADER-EXAMPLE ::= {
 }
 
 test-header:
-  header := Parameter.parse-header_ HEADER-EXAMPLE context JsonPointer
+  header := Parameter.parse-header_ --name="" HEADER-EXAMPLE context JsonPointer
   expect header.is-header
   expect-equals "" header.name
   expect-equals Parameter.HEADER header.in

@@ -289,7 +289,7 @@ class Parser_:
           else:
             max = null
         if not consume-char_ == '}':
-          throw "Expected '}'"
+          throw "Expected '}': $str"
         token = Multi token --min=min --max=max --is-eager=(not parse-lazy_)
       else:
         break

@@ -343,7 +343,10 @@ class VocabularyValidation implements Vocabulary:
       schema.add-assertion (Const value)
 
     ["multipleOf", "maximum", "exclusiveMaximum", "minimum", "exclusiveMinimum"].do: | keyword/string |
-      json.get keyword --if-present=: | n/num |
+      json.get keyword --if-present=: | value |
+        if value is not num:
+          throw "Invalid value for '$keyword' keyword: $value"
+        n := value as num
         kind/int := ?
         if keyword == "multipleOf": kind = NumComparison.MULTIPLE-OF
         else if keyword == "maximum": kind = NumComparison.MAXIMUM
@@ -590,12 +593,19 @@ class VocabularyOpenApi implements Vocabulary:
         x-of.is-disabled = true
 
         implicit-targets = x-of.subschemas.map: | subschema/Schema |
-          if subschema is not Ref or (subschema as Ref).is-dynamic:
-            throw "Invalid discriminator schema with 'anyOf' or 'oneOf' keyword. Only references are allowed."
-          ref := subschema as Ref
-          target := ref.target
-          if not target:
-            throw "Unresolved target for ref that is used in discriminator."
+          // Find the 'ref' in the subschema.
+          target/Schema? := null
+          actions := subschema.actions
+          for i := 0; i < actions.size; i++:
+            action/Action := actions[i]
+            if action is Ref:
+              ref := action as Ref
+              if ref.is-dynamic:
+                throw "Invalid discriminator schema with 'anyOf' or 'oneOf' keyword. Only non-dynamic references are allowed."
+              target = ref.target
+              if not target:
+                throw "Unresolved target for ref that is used in discriminator."
+              break
           target
       else:
         // The schema containing this discriminator doesn't have any

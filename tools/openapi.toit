@@ -789,7 +789,7 @@ class PathItem extends Extensionable_:
               --if-absent=: Parameter.parse_ entry context parameter-pointer
           parameters.add parameter
 
-    return PathItem
+    result := PathItem
       --ref=o.get "\$ref"
       --summary=o.get "summary"
       --description=o.get "description"
@@ -804,6 +804,8 @@ class PathItem extends Extensionable_:
       --servers=o.get "servers"
       --parameters=parameters
       --extensions=Extensionable_.extract-extensions o
+    context.add-to-store result --pointer=pointer
+    return result
 
   to-json -> Map:
     result := {:}
@@ -1443,11 +1445,13 @@ class RequestBody extends Extensionable_:
     content-pointer := pointer["content"]
     content := content-json.map: | key value |
       MediaType.parse_ value context content-pointer[key]
-    return RequestBody
+    result := RequestBody
       --description=o.get "description"
       --content=content
       --required=o.get "required"
       --extensions=Extensionable_.extract-extensions o
+    context.add-to-store result --pointer=pointer
+    return result
 
   to-json -> Map:
     result := {
@@ -1843,9 +1847,11 @@ class Callback extends Extensionable_:
       callbacks[RuntimeExpression key] = value.get "\$ref"
           --if-present=: Reference.parse_ --kind=Reference.PATH-ITEM value context pointer[key]
           --if-absent=: PathItem.parse_ value context pointer[key]
-    return Callback
+    result := Callback
         --callbacks=callbacks
         --extensions=Extensionable_.extract-extensions o
+    context.add-to-store result --pointer=pointer
+    return result
 
   to-json -> Map:
     result := {:}
@@ -1893,12 +1899,14 @@ class Example extends Extensionable_:
     super --extensions=extensions
 
   static parse_ o/Map context/BuildContext pointer/JsonPointer -> Example:
-    return Example
+    result := Example
       --summary=o.get "summary"
       --description=o.get "description"
       --value=o.get "value"
       --external-value=o.get "externalValue"
       --extensions=Extensionable_.extract-extensions o
+    context.add-to-store result --pointer=pointer
+    return result
 
   to-json -> Map:
     result := {:}
@@ -1981,7 +1989,7 @@ class Link extends Extensionable_:
             : json-body
         runtime or json-body
 
-    return Link
+    result := Link
       --operation-ref=o.get "operationRef"
       --operation-id=o.get "operationId"
       --parameters=parameters
@@ -1989,6 +1997,8 @@ class Link extends Extensionable_:
       --description=o.get "description"
       --server=o.get "server" --if-present=: Server.parse_ it context pointer["server"]
       --extensions=Extensionable_.extract-extensions o
+    context.add-to-store result --pointer=pointer
+    return result
 
   to-json -> Map:
     result := {:}
@@ -2207,12 +2217,21 @@ class SecurityScheme extends Extensionable_:
 
   static parse_ o/Map context/BuildContext pointer/JsonPointer -> SecurityScheme:
     type := o["type"]
-    if type == API-KEY: return SecuritySchemeApiKey.parse_ o context pointer
-    if type == HTTP: return SecuritySchemeHttp.parse_ o context pointer
-    if type == MUTUAL-TLS: return SecuritySchemeMutualTls.parse_ o context pointer
-    if type == OAUTH2: return SecuritySchemeOAuth2.parse_ o context pointer
-    if type == OPENID-CONNECT: return SecuritySchemeOpenIdConnect.parse_ o context pointer
-    throw "Unknown security scheme type: $type"
+    result := ?
+    if type == API-KEY:
+      result = SecuritySchemeApiKey.parse_ o context pointer
+    else if type == HTTP:
+      result = SecuritySchemeHttp.parse_ o context pointer
+    else if type == MUTUAL-TLS:
+      result = SecuritySchemeMutualTls.parse_ o context pointer
+    else if type == OAUTH2:
+      result = SecuritySchemeOAuth2.parse_ o context pointer
+    else if type == OPENID-CONNECT:
+      result = SecuritySchemeOpenIdConnect.parse_ o context pointer
+    else:
+      throw "Unknown security scheme type: $type"
+    context.add-to-store result --pointer=pointer
+    return result
 
   to-json -> Map:
     result := {
