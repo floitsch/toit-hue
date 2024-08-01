@@ -85,9 +85,13 @@ resolve openapi/OpenApi context/BuildContext:
         throw "Reference not found: $ref.target-uri"
       ref.resolved_ = target
 
+hash-code-counter_/int := 0
+
 /** The root object of the OpenAPI document. */
 // https://spec.openapis.org/oas/v3.1.0#openapi-object
 class OpenApi extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   The URL where the OpenAPI document was originally retrieved from.
   The $Server.url field may be relative to this field.
@@ -255,6 +259,8 @@ The metadata may be used by the clients if needed, and may be presented
 */
 // https://spec.openapis.org/oas/v3.1.0#info-object
 class Info extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /** The title of the API. */
   title/string
 
@@ -328,6 +334,8 @@ class Info extends Extensionable_:
 /** Contact information for the exposed API. */
 // https://spec.openapis.org/oas/v3.1.0#contact-object
 class Contact extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /** The identifying name of the contact person/organization. */
   name/string?
 
@@ -369,6 +377,8 @@ class Contact extends Extensionable_:
 /** License information for the exposed API. */
 // https://spec.openapis.org/oas/v3.1.0#license-object
 class License extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /** The license name used for the API. */
   name/string
 
@@ -413,6 +423,8 @@ class License extends Extensionable_:
 /** An object representing a server. */
 // https://spec.openapis.org/oas/v3.1.0#server-object
 class Server extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   A URL to the target host.
   This URL supports server variables and may be relative, to indicate that
@@ -465,6 +477,8 @@ class Server extends Extensionable_:
 /** An object representing a server variable for server URL template substitution. */
 // https://spec.openapis.org/oas/v3.1.0#server-variable-object
 class ServerVariable extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   An enumeration of string values to be used if the substitution options are
     from a limited set.
@@ -523,6 +537,8 @@ Example field names: `User`, `User_1`, `User_Name`, `user-name`, `my.org.User`.
 */
 // https://spec.openapis.org/oas/v3.1.0#components-object
 class Components extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /** An object to hold reusable $Schema objects. */
   schemas/Map? // from string to Schema.
 
@@ -638,6 +654,8 @@ The path is appended to the URL from the $Server Object in order to construct
 */
 // https://spec.openapis.org/oas/v3.1.0#paths-object
 class Paths extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   A map from a path to a $PathItem.
 
@@ -681,6 +699,8 @@ The path itself is still exposed to the documentation viewer but they will
   not know which operations and parameters are available.
 */
 class PathItem extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   Allows for a referenced definition of this path item.
 
@@ -789,6 +809,7 @@ class PathItem extends Extensionable_:
               --if-absent=: Parameter.parse_ entry context parameter-pointer
           parameters.add parameter
 
+    if o.get "summary" or o.get "description": throw "HERE"
     result := PathItem
       --ref=o.get "\$ref"
       --summary=o.get "summary"
@@ -827,6 +848,8 @@ class PathItem extends Extensionable_:
 
 /** Describes a single API operation on a path. */
 class Operation extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   A list of tags for API documentation control.
   Tags can be used for logical grouping of operations by resources or any
@@ -1001,6 +1024,8 @@ class Operation extends Extensionable_:
 Allows referencing an external resource for extended documentation.
 */
 class ExternalDocumentation extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   A description of the target documentation.
   CommonMark syntax may be used for rich text representation.
@@ -1058,6 +1083,8 @@ Headers are the same as parameters, except for the following differences:
 - The $Parameter.in is implicitly set to $HEADER.
 */
 class Parameter extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   static PATH ::= "path"
   static QUERY ::= "query"
   static HEADER ::= "header"
@@ -1414,6 +1441,8 @@ class Parameter extends Extensionable_:
 A single request body.
 */
 class RequestBody extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   A brief description of the request body.
   This could contain examples of use.
@@ -1466,6 +1495,8 @@ class RequestBody extends Extensionable_:
 Groups the schema, examples and encoding definitions for a single media type.
 */
 class MediaType extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   The schema defining the content of the request, response, or parameter.
   */
@@ -1538,6 +1569,8 @@ class MediaType extends Extensionable_:
 A single encoding definition applied to a single schema property.
 */
 class Encoding extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   The Content-Type for encoding a specific property.
 
@@ -1662,6 +1695,8 @@ An instance of this class must contain at least one response code, and if
   successful operation call.
 */
 class Responses extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   The documentation of responses other than the ones declared for specific
     HTTP response codes.
@@ -1727,6 +1762,8 @@ A single response from an API Operation, including design-time, static
   links to operations based on the response.
 */
 class Response extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   A short description of the response.
   CommonMark syntax may be used for rich text representation.
@@ -1825,6 +1862,8 @@ class RuntimeExpression:
 A map of possible out-of band callbacks related to the parent operation.
 */
 class Callback extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   A map of possible out-of band callbacks related to the parent operation.
 
@@ -1863,6 +1902,8 @@ class Callback extends Extensionable_:
 An example for the API operation.
 */
 class Example extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /** A short description of the example. */
   summary/string?
 
@@ -1918,6 +1959,8 @@ class Example extends Extensionable_:
     return result
 
 class Link extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   A relative or absolute URI reference to an OAS operation.
 
@@ -2020,6 +2063,8 @@ class Link extends Extensionable_:
     return result
 
 class Tag extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   The name of the tag.
   */
@@ -2069,6 +2114,8 @@ See [Reference Object](https://spec.openapis.org/oas/v3.1.0#relativeReferencesUR
 Note: this class does not allow to be extended.
 */
 class Reference:
+  hash-code/int ::= hash-code-counter_++
+
   static RESPONSE ::= 1
   static PARAMETER ::= 2
   static EXAMPLE ::= 3
@@ -2162,6 +2209,8 @@ class Reference:
     return result
 
 class Schema:
+  hash-code/int ::= hash-code-counter_++
+
   original-json_/Map
   schema/json-schema.JsonSchema
 
@@ -2192,6 +2241,8 @@ The following security schemes are supported by OpenAPI:
 - OpenID Connect Discovery.
 */
 class SecurityScheme extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   static API-KEY ::= "apiKey"
   static HTTP ::= "http"
   static MUTUAL-TLS ::= "mutualTLS"
@@ -2243,6 +2294,8 @@ class SecurityScheme extends Extensionable_:
 
 
 class SecuritySchemeApiKey extends SecurityScheme:
+  hash-code/int ::= hash-code-counter_++
+
   static HEADER ::= "header"
   static QUERY ::= "query"
   static COOKIE ::= "cookie"
@@ -2276,6 +2329,8 @@ class SecuritySchemeApiKey extends SecurityScheme:
     return result
 
 class SecuritySchemeHttp extends SecurityScheme:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   The name of the HTTP Authorization scheme to be used in the Authorization header
     as defined in [RFC7235](https://httpwg.org/specs/rfc7235.html).
@@ -2310,6 +2365,8 @@ class SecuritySchemeHttp extends SecurityScheme:
     return result
 
 class SecuritySchemeMutualTls extends SecurityScheme:
+  hash-code/int ::= hash-code-counter_++
+
   constructor --description/string?=null --extensions/Map?=null:
     super --type=SecurityScheme.MUTUAL-TLS --description=description --extensions=extensions
 
@@ -2322,6 +2379,8 @@ class SecuritySchemeMutualTls extends SecurityScheme:
     return super
 
 class SecuritySchemeOAuth2 extends SecurityScheme:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   An object containing configuration information for the OAuth2 flow types.
   */
@@ -2342,6 +2401,8 @@ class SecuritySchemeOAuth2 extends SecurityScheme:
     return result
 
 class SecuritySchemeOpenIdConnect extends SecurityScheme:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   The URL to the OpenID Connect discovery document.
   This must be an absolute URL.
@@ -2367,6 +2428,8 @@ class SecuritySchemeOpenIdConnect extends SecurityScheme:
     return result
 
 class OAuthFlows extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   Configuration for the OAuth Implicit flow.
   */
@@ -2417,6 +2480,8 @@ class OAuthFlows extends Extensionable_:
     return result
 
 class OAuthFlow extends Extensionable_:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   The URL to be used for obtaining refresh tokens.
   This must be in the form of a URL.
@@ -2444,6 +2509,8 @@ class OAuthFlow extends Extensionable_:
     return result
 
 class OAuthFlowImplicit extends OAuthFlow:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   The authorization URL to be used for this flow.
   This must be in the form of a URL.
@@ -2467,6 +2534,8 @@ class OAuthFlowImplicit extends OAuthFlow:
     return result
 
 class OAuthFlowPassword extends OAuthFlow:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   The token URL to be used for this flow.
   This must be in the form of a URL.
@@ -2490,6 +2559,8 @@ class OAuthFlowPassword extends OAuthFlow:
     return result
 
 class OAuthFlowClientCredentials extends OAuthFlow:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   The token URL to be used for this flow.
   This must be in the form of a URL.
@@ -2513,6 +2584,8 @@ class OAuthFlowClientCredentials extends OAuthFlow:
     return result
 
 class OAuthFlowAuthorizationCode extends OAuthFlow:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   The authorization URL to be used for this flow.
   This must be in the form of a URL.
@@ -2552,6 +2625,8 @@ All the schemes must be satisfied for the operation to be permitted.
 */
 // Note: the specification does not make this class extensible.
 class SecurityRequirement:
+  hash-code/int ::= hash-code-counter_++
+
   /**
   A map between the name of a security scheme and a list.
   The content of the list depends on the type of the scheme:
