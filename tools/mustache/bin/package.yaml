@@ -1,0 +1,6 @@
+dependencies:
+  cli:
+    url: github.com/toitlang/pkg-cli
+    version: ^1.8.0
+  mustache:
+    path: ..
