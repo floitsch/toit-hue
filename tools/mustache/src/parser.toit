@@ -257,8 +257,15 @@ class Parser_:
 
   parse-partial -> Node:
     consume
+    skip-space-or-tab
+    if peek == '*':
+      // A dynamic name.
+      consume
+      name-entry := parse-name
+      return PartialDynamicNode name-entry
+
     name := parse-name
-    return PartialNode name
+    return PartialConcreteNode name
 
   parse-comment -> Node?:
     consume

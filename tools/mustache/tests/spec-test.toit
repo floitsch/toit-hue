@@ -9,7 +9,7 @@ main args:
 
   stream := directory.DirectoryStream specs-path
   while name := stream.next:
-    if name.starts-with "~": continue
+    if name.starts-with "~" and name != "~dynamic-names.json": continue
     if not name.ends-with ".json": continue
     path := "$specs-path/$name"
     run-test-suite path

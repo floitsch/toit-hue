@@ -34,13 +34,23 @@ class SectionNode extends Node:
   stringify -> string:
     return "Section: $name\n  Inverted: $inverted\n  Children: $children"
 
-class PartialNode extends Node:
-  name/string
+abstract class PartialNode extends Node:
   indentation/string := ""
-
-  constructor .name:
 
   can-be-standalone -> bool: return true
 
+class PartialConcreteNode extends PartialNode:
+  name/string
+
+  constructor .name:
+
   stringify -> string:
     return "Partial: $name\n  Indentation: '$indentation'"
+
+class PartialDynamicNode extends PartialNode:
+  partial-field/string
+
+  constructor .partial-field:
+
+  stringify -> string:
+    return "PartialDynamic: $partial-field\n Indentation: '$indentation'"

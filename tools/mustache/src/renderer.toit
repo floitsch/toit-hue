@@ -30,8 +30,10 @@ class Renderer:
       return render-variable (node as VariableNode)
     else if node is SectionNode:
       return render-section (node as SectionNode)
-    else if node is PartialNode:
-      return render-partial (node as PartialNode)
+    else if node is PartialConcreteNode:
+      return render-partial-concrete (node as PartialConcreteNode)
+    else if node is PartialDynamicNode:
+      return render-partial-dynamic (node as PartialDynamicNode)
     else:
       throw "Unknown node type: $node"
 
@@ -71,17 +73,28 @@ class Renderer:
         return result
       return render-nodes-with-context node.children value
 
-  render-partial node/PartialNode -> string:
-    partial-template := partials.get node.name
+  render-partial partial-name/string indentation/string -> string:
+    partial-template := partials.get partial-name
     if not partial-template:
       if strict:
-        throw "Partial not found: $node.name"
+        throw "Partial not found: $partial-name"
       return ""
-    old-indentation := indentation
-    indentation += node.indentation
+    old-indentation := this.indentation
+    this.indentation += indentation
     result := render-nodes partial-template
-    indentation = old-indentation
+    this.indentation = old-indentation
     return result
+
+  render-partial-concrete node/PartialConcreteNode -> string:
+    return render-partial node.name node.indentation
+
+  render-partial-dynamic node/PartialDynamicNode -> string:
+    partial-name := lookup-value node.partial-field
+    if not partial-name:
+      if strict:
+        throw "Partial field not found: $node.partial-field"
+      return ""
+    return render-partial partial-name node.indentation
 
   render-nodes-with-context nodes/List context/any -> string:
     inputs.add context
