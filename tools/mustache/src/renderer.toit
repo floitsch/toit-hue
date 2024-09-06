@@ -1,11 +1,12 @@
 import .node
 
-class Renderer:
+class Renderer implements Visitor:
   main-template/List  // Of Node.
   partials/Map  // String to List of Node.
   inputs/List := []  // The input stack. New section push their specialization.
   indentation/string := ""  // The current indentation.
   strict/bool
+  inheritance-stack := []  // Of List of PartialInheritanceNode.
 
   constructor .main-template .partials input --.strict=false:
     inputs.add input
@@ -26,19 +27,14 @@ class Renderer:
   render-node node/Node --is-last/bool -> string:
     if node is TextNode:
       return render-text (node as TextNode) --is-last=is-last
-    else if node is VariableNode:
-      return render-variable (node as VariableNode)
-    else if node is SectionNode:
-      return render-section (node as SectionNode)
-    else if node is PartialConcreteNode:
-      return render-partial-concrete (node as PartialConcreteNode)
-    else if node is PartialDynamicNode:
-      return render-partial-dynamic (node as PartialDynamicNode)
-    else:
-      throw "Unknown node type: $node"
+    return node.accept this
 
   indent_ str/string -> string:
     return str.replace "\n" "\n$indentation"
+
+  visit-text node/TextNode -> string:
+    // The visitor is short-cut for text nodes.
+    unreachable
 
   render-text node/TextNode --is-last/bool -> string:
     text := node.text
@@ -48,14 +44,14 @@ class Renderer:
       return "$(indent_ text[..text.size - 1])\n"
     return indent_ text
 
-  render-variable node/VariableNode -> string:
+  visit-variable node/VariableNode -> string:
     value := lookup-value node.name
     if not value: return ""
     if node.escape:
       return html-escape "$value"
     return "$value"
 
-  render-section node/SectionNode -> string:
+  visit-section node/SectionNode -> string:
     value := lookup-value node.name
     if node.inverted:
       if not value or (value is List and value.is-empty) or (value is Map and value.is-empty):
@@ -85,16 +81,30 @@ class Renderer:
     this.indentation = old-indentation
     return result
 
-  render-partial-concrete node/PartialConcreteNode -> string:
+  visit-partial-concrete node/PartialConcreteNode -> string:
     return render-partial node.name node.indentation
 
-  render-partial-dynamic node/PartialDynamicNode -> string:
+  visit-partial-dynamic node/PartialDynamicNode -> string:
     partial-name := lookup-value node.partial-field
     if not partial-name:
       if strict:
         throw "Partial field not found: $node.partial-field"
       return ""
     return render-partial partial-name node.indentation
+
+  visit-block node/BlockNode -> string:
+    name := node.name
+    render-node := node
+    for i := inheritance-stack.size - 1; i >= 0; i--:
+      inheritance/PartialInheritanceNode := inheritance-stack[i]
+      inheritance.overridden.get name --if-present=: render-node = it
+    return render-nodes render-node.children
+
+  visit-partial-inheritance node/PartialInheritanceNode -> string:
+    inheritance-stack.add node
+    result := render-partial node.name node.indentation
+    inheritance-stack.resize (inheritance-stack.size - 1)
+    return result
 
   render-nodes-with-context nodes/List context/any -> string:
     inputs.add context

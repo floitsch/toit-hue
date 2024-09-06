@@ -12,6 +12,9 @@ class CloseNode extends Node:
 
   can-be-standalone -> bool: return true
 
+  accept visitor/Visitor -> none:
+    unreachable
+
   stringify -> string:
     return "Close: $name"
 
@@ -88,8 +91,8 @@ class Parser_:
         if stack.is-empty:
           result.add node
         else:
-          section-node/SectionNode := stack.last
-          section-node.children.add node
+          container-node/ContainerNode := stack.last
+          container-node.add-child node --strict=strict
 
     while true:
       c := peek
@@ -132,11 +135,11 @@ class Parser_:
           start-pos = tag-end-pos
           last-non-white = tag-end-pos - 1
 
-        if node is SectionNode:
+        if node is ContainerNode:
           stack.add node
         else if node is CloseNode:
-          section-name := (node as CloseNode).name
-          if stack.is-empty or (stack.last as SectionNode).name != section-name:
+          name := (node as CloseNode).name
+          if stack.is-empty or (stack.last as ContainerNode).name != name:
             throw "Unbalanced tags/sections"
           stack.resize (stack.size - 1)
         continue
@@ -211,6 +214,10 @@ class Parser_:
       result = parse-section
     else if type == '>':
       result = parse-partial
+    else if type == '$':
+      result = parse-block
+    else if type == '<':
+      result = parse-inheritance
     else if type == '!':
       result = parse-comment
     else if type == '=':
@@ -266,6 +273,16 @@ class Parser_:
 
     name := parse-name
     return PartialConcreteNode name
+
+  parse-block -> Node:
+    consume
+    name := parse-name
+    return BlockNode name
+
+  parse-inheritance -> Node:
+    consume
+    name := parse-name
+    return PartialInheritanceNode name
 
   parse-comment -> Node?:
     consume
