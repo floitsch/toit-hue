@@ -237,8 +237,6 @@ class Parser_:
     type := peek
     if type == '{':
       // Temporarily set the closing delimiter to '}'+old-delimiter.
-      // The $parse-tag function will undo this change after it consumed the
-      // closing delimiters.
       close-delimiter = #['}'] + close-delimiter
 
     consume
