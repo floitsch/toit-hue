@@ -18,6 +18,32 @@ class CloseNode extends Node:
   stringify -> string:
     return "Close: $name"
 
+class CommentNode extends Node:
+  comment/string
+
+  constructor .comment:
+
+  can-be-standalone -> bool: return true
+
+  accept visitor/Visitor -> any:
+    unreachable
+
+  stringify -> string:
+    return "Comment: '$comment'"
+
+class DelimiterNode extends Node:
+  delimiters/ByteArray
+
+  constructor .delimiters:
+
+  can-be-standalone -> bool: return true
+
+  accept visitor/Visitor -> any:
+    unreachable
+
+  stringify -> string:
+    return "Delimiters: '$delimiters'"
+
 /**
 Parses the given $template.
 
@@ -35,16 +61,10 @@ class Parser_:
   open-delimiter/ByteArray := #['{', '{']
   close-delimiter/ByteArray := #['}', '}']
 
-  stack := []  // Of SectionNode.
-
   /** The current position in the template. */
   pos := 0
   /** The starting position of a text node. */
   start-pos := 0
-  /** Position of the last newline that was encountered. */
-  last-new-line := -1
-  /** Position of the last non-witespace character that was encountered. */
-  last-non-white := -1
 
   /** The template that is currently parsed. */
   template/string
@@ -67,8 +87,11 @@ class Parser_:
       if c != ' ' and c != '\t': return
       consume
 
-  is-eof-or-whitespace c/int -> bool:
-    return c == null or c == ' ' or c == '\n' or c == '\r' or c == '\t'
+  is-whitespace c/int -> bool:
+    return c == ' ' or c == '\n' or c == '\r' or c == '\t'
+
+  is-eof-or-whitespace c/int? -> bool:
+    return c == null or is-whitespace c
 
   at-opening-delimiter -> bool:
     open-delimiter.size.repeat: | i/int |
@@ -83,74 +106,88 @@ class Parser_:
   at-eof -> bool:
     return pos >= template.size
 
+  is-whitespace-text-node text-node/TextNode -> bool:
+    text-node.text.do: | c/int |
+      if not is-whitespace c: return false
+    return true
+
+  /**
+  A standalone line is a line that only contains whitespace and tags that
+    can be standalone.
+  */
+  is-standalone-line line-nodes/List -> bool:
+    if line-nodes.is-empty: return false
+    have-seen-standalone-tag := false
+    line-nodes.do: | node/Node |
+      if node is TextNode:
+        if not is-whitespace-text-node (node as TextNode): return false
+      else:
+        if not node.can-be-standalone: return false
+        have-seen-standalone-tag = true
+    return have-seen-standalone-tag
+
   parse -> List:  // Of Node.
-    result := []
+    all-nodes := []
 
-    add := : | node/Node? |
-      if node and node is not CloseNode:
-        if stack.is-empty:
-          result.add node
-        else:
-          container-node/ContainerNode := stack.last
-          container-node.add-child node --strict=strict
+    line-nodes := []
+    add-to-line := : | node/Node? |
+      if node: line-nodes.add node
 
+    finish-line := :
+      if not line-nodes.is-empty:
+        if is-standalone-line line-nodes:
+          indentation := ""
+          line-nodes.do: | node/Node |
+            if node is TextNode:
+              indentation += (node as TextNode).text
+            else if node is PartialNode:
+              (node as PartialNode).indentation = indentation
+          line-nodes.filter --in-place: | node/Node | node is not TextNode
+        all-nodes.add-all line-nodes
+        line-nodes = []
+
+    this-line-texts := []
     while true:
       c := peek
       if c == null:
-        add.call (build-text-node pos)
+        add-to-line.call (build-text-node pos)
+        finish-line.call
         break
 
-      if at-opening-delimiter:
-        tag-pos := pos
-        // Parse the tag, but don't consume the text yet.
-        // We might have a stand-alone tag, in which case the last line of
-        // the unhandled text could be part of the tag.
-        node := parse-tag
-        is-standalone := false
-        tag-end-pos := pos
-        if not node or node.can-be-standalone:
-          if last-non-white <= last-new-line:
-            // The tag is not preceded by anything that isn't whitespace.
-            skip-space-or-tab
-            c = peek
-            if c == null or c == '\n' or (c == '\r' and (peek 1) == '\n'):
-              // It's only followed by whitespace.
-              is-standalone = true
-
-        if is-standalone:
-          // Only consume the text up to (and including) the last new-line.
-          add.call (build-text-node (last-new-line + 1))
-          indentation/string := template[last-new-line + 1..tag-pos]
-          if node is PartialNode:
-            // The indentation is the same as the partial tag.
-            (node as PartialNode).indentation = indentation
-          add.call node
-          consume-new-line --allow-eof
-          start-pos = pos
-          last-new-line = pos - 1
-          last-non-white = pos - 1
-        else:
-          add.call (build-text-node tag-pos)
-          add.call node
-          start-pos = tag-end-pos
-          last-non-white = tag-end-pos - 1
-
-        if node is ContainerNode:
-          stack.add node
-        else if node is CloseNode:
-          name := (node as CloseNode).name
-          if stack.is-empty or (stack.last as ContainerNode).name != name:
-            throw "Unbalanced tags/sections"
-          stack.resize (stack.size - 1)
+      if c == '\n':
+        consume
+        add-to-line.call (build-text-node pos)
+        finish-line.call
+        start-pos = pos
         continue
 
-      if c == '\n':
-        last-new-line = pos
-      else if not is-eof-or-whitespace c:
-        // This can only be whitespace, since we already checked for null above.
-        last-non-white = pos
+      if at-opening-delimiter:
+        add-to-line.call (build-text-node pos)
+        node := parse-tag
+        add-to-line.call node
+        start-pos = pos
+        continue
 
       consume
+
+    // Nest all nodes of containers and remove close nodes.
+    result := []
+    stack := []  // Of ContainerNode.
+    all-nodes.do: | node/Node |
+      if node is CommentNode: continue.do
+      if node is DelimiterNode: continue.do
+      if node is CloseNode:
+        name := (node as CloseNode).name
+        if stack.is-empty or (stack.last as ContainerNode).name != name:
+          throw "Unbalanced tags/sections"
+        stack.resize (stack.size - 1)
+      else:
+        if stack.is-empty:
+          result.add node
+        else:
+          (stack.last as ContainerNode).add-child node --strict=strict
+      if node is ContainerNode:
+        stack.add node
 
     if not stack.is-empty:
       open-section-names := stack.map: | section/SectionNode | section.name
@@ -284,9 +321,11 @@ class Parser_:
 
   parse-comment -> Node?:
     consume
+    comment-start := pos
     while not at-eof and not at-closing-delimiter:
       consume
-    return null
+    comment := template[comment-start..pos]
+    return CommentNode comment
 
   parse-delimiters -> Node?:
     consume
@@ -307,7 +346,7 @@ class Parser_:
     // delimiter, so we are free to change the delimiters now.
     open-delimiter = new-open-string.to-byte-array
     close-delimiter = new-close-string.to-byte-array
-    return null
+    return DelimiterNode open-delimiter
 
   parse-close -> CloseNode:
     consume
