@@ -8,7 +8,7 @@ main args:
   specs-path := args.first
 
   stream := directory.DirectoryStream specs-path
-  while name := stream.next:
+  while name/string? := stream.next:
     if name.starts-with "~lambdas": continue
     if not name.ends-with ".json": continue
     path := "$specs-path/$name"
