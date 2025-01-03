@@ -1,4 +1,4 @@
-import uuid
+import uuid show Uuid
 
 import .json-schema as json-schema
 import .json-schema.json-pointer show JsonPointer
@@ -47,7 +47,7 @@ class BuildContext:
   references/List := []
 
   static random-uri_ -> UriReference:
-    return UriReference.parse "urn:uuid:$(uuid.uuid5 "json-schema" "$Time.now.ns-since-epoch")"
+    return UriReference.parse "urn:uuid:$(Uuid.uuid5 "json-schema" "$Time.now.ns-since-epoch")"
 
   constructor --.uri=random-uri_:
 
@@ -59,7 +59,7 @@ class BuildContext:
 build o/Map --uri/string?=null -> OpenApi:
   schema-dialect := o.get "jsonSchemaDialect"
   pointer := JsonPointer
-  if not uri: uri = "urn:uuid:$(uuid.uuid5 "json-schema" "$Time.now.ns-since-epoch")"
+  if not uri: uri = "urn:uuid:$(Uuid.uuid5 "json-schema" "$Time.now.ns-since-epoch")"
   context := BuildContext --uri=(UriReference.parse uri)
   context.json-schema-dialect = schema-dialect
 
