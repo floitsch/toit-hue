@@ -106,7 +106,9 @@ class Parser_:
   at-eof -> bool:
     return pos >= template.size
 
-  is-whitespace-text-node text-node/TextNode -> bool:
+  is-whitespace-text-node node/Node -> bool:
+    if node is not TextNode: return false
+    text-node := node as TextNode
     text-node.text.do: | c/int |
       if not is-whitespace c: return false
     return true
@@ -118,13 +120,30 @@ class Parser_:
   is-standalone-line line-nodes/List -> bool:
     if line-nodes.is-empty: return false
     have-seen-standalone-tag := false
+    node-stack := []
     line-nodes.do: | node/Node |
       if node is TextNode:
         if not is-whitespace-text-node (node as TextNode): return false
       else:
         if not node.can-be-standalone: return false
         have-seen-standalone-tag = true
+
+      if node is ContainerNode:
+        node-stack.add node
+      if node is CloseNode:
+        if not node-stack.is-empty:
+          top-node := node-stack.last
+          // Block nodes are only standalone if the
+          // closing tag is not on the same line.
+          if top-node is BlockNode: return false
+          node-stack.resize (node-stack.size - 1)
+
     return have-seen-standalone-tag
+
+  is-block-indentation-line line-nodes/List -> bool:
+    if line-nodes.size < 2: return false
+    if not is-whitespace-text-node line-nodes[0]: return false
+    return line-nodes[1] is BlockNode
 
   parse -> List:  // Of Node.
     all-nodes := []
@@ -138,11 +157,21 @@ class Parser_:
         if is-standalone-line line-nodes:
           indentation := ""
           line-nodes.do: | node/Node |
+            node.is-standalone = true
             if node is TextNode:
               indentation += (node as TextNode).text
             else if node is PartialNode:
               (node as PartialNode).indentation = indentation
+            else if node is BlockNode:
+              block-node := node as BlockNode
+              block-node.indentation = indentation
           line-nodes.filter --in-place: | node/Node | node is not TextNode
+        else if is-block-indentation-line line-nodes:
+          indentation := (line-nodes[0] as TextNode).text
+          node := line-nodes[1]
+          if node is BlockNode:
+            (node as BlockNode).indentation = indentation
+          line-nodes = line-nodes[1..]
         all-nodes.add-all line-nodes
         line-nodes = []
 

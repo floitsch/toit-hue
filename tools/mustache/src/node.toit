@@ -14,6 +14,8 @@ interface Visitor:
   visit-partial-inheritance node/PartialInheritanceNode -> any
 
 abstract class Node:
+  is-standalone/bool := false
+
   abstract can-be-standalone -> bool
 
   abstract accept visitor/Visitor -> any
@@ -202,6 +204,7 @@ See $PartialInheritanceNode.
 class BlockNode extends Node implements ContainerNode:
   name/string
   children/List ::= []  // Will be filled by the parser.
+  indentation/string := ""
 
   constructor .name:
 
@@ -214,7 +217,7 @@ class BlockNode extends Node implements ContainerNode:
     return visitor.visit-block this
 
   stringify -> string:
-    return "BlockTag: $name"
+    return "BlockTag: $name (Indentation: '$indentation')"
 
 /**
 A node that represents a partial inheritance.

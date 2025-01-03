@@ -92,13 +92,64 @@ class Renderer implements Visitor:
       return ""
     return render-partial partial-name node.indentation
 
+  is-indentation-char c/int -> bool:
+    return c == ' ' or c == '\t'
+
+  extract-line-indentation text/string -> string:
+    for i := 0; i < text.size; i++:
+      c := text.at --raw i
+      if not is-indentation-char c: return text[..i]
+    return text
+
+  merge-indentation indent1/string? indent2/string -> string:
+    if not indent1: return indent2
+    if indent2.size < indent1.size:
+      tmp := indent1
+      indent1 = indent2
+      indent2 = tmp
+    for i := 0; i < indent1.size; i++:
+      if (indent1.at --raw i) != (indent2.at --raw i): return indent1[..i]
+    return indent1
+
+  extract-indentation text/string -> string:
+    indent/string? := null
+    while true:
+      indent = merge-indentation indent (extract-line-indentation text)
+      if indent == "": return ""
+      next-line := text.index-of "\n"
+      if next-line < 0: return indent
+      text = text[next-line + 1..]
+      if text == "": return indent
+
+  block-indentation node/BlockNode -> string:
+    if node.is-standalone and not node.children.is-empty and node.children.first is TextNode:
+      return extract-indentation (node.children.first as TextNode).text
+    return node.indentation
+
+  replace-indentation text/string --new-indentation -> string:
+    text-indentation := extract-indentation text
+    if text-indentation == new-indentation: return text
+    text = text.trim --left text-indentation
+    text = new-indentation + text
+    text = text.replace --all "\n$text-indentation" "\n$new-indentation"
+    if text.ends-with "\n$new-indentation":
+      text = text[..text.size - new-indentation.size]
+    return text
+
   visit-block node/BlockNode -> string:
     name := node.name
     render-node := node
     for i := inheritance-stack.size - 1; i >= 0; i--:
       inheritance/PartialInheritanceNode := inheritance-stack[i]
       inheritance.overridden.get name --if-present=: render-node = it
-    return render-nodes render-node.children
+    result := render-nodes render-node.children
+    if render-node != node:
+      // The block was replaced.
+      // Switch the indentation.
+      node-indentation := this.indentation
+      node-indentation += block-indentation node
+      result = replace-indentation result --new-indentation=node-indentation
+    return result
 
   visit-partial-inheritance node/PartialInheritanceNode -> string:
     inheritance-stack.add node
