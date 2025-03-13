@@ -1,16 +1,7 @@
 import encoding.yaml
 import host.file
 import io
-import .openapi
-
-interface Fs:
-  create-file path/string -> io.CloseableWriter
-
-class FsDisk implements Fs:
-  create-file path/string -> io.CloseableWriter:
-    stream := file.Stream.for-write path
-    return stream.out
-
+import .mustache.src.mustache as mustache
 
 class GlobalNamer:
   used-globals_/Set ::= {}
@@ -55,7 +46,8 @@ class ClassNamer:
 
   to-method-name_ name/string -> string:
     // TODO(florian): make this more robust and complete.
-    name = name.replace --all "/" "-"
+    name = name.replace --all "/" " "
+    name = name.trim
     name = name.replace --all " " "-"
     return name
 
@@ -116,15 +108,18 @@ class OpenApiGenerator:
     parameters := (op.parameters or []).map: | param/Parameter |
       method-namer.for-parameter param
 
+    parameter-string := parameters.join ", "
+    if parameter-string != "":
+      parameter-string = " $parameter-string"
     writer.write """
-        $name $(parameters.join " "):
+        $name$parameter-string:
           // TODO(florian): implement
           throw "Not implemented"
       """
 
 main args/List:
   if args.size != 2:
-    print "Usage: openapi-to-toit <openapi.json> <output-dir>"
+    print "Usage: openapi-to-toit <openapi.yaml> <output-dir>"
     return
   openapi := build (yaml.decode (file.read-content args[0]))
   fs := FsDisk

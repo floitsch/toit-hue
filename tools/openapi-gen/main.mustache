@@ -1,0 +1,22 @@
+import openapi
+
+class Client extends openapi.Client:
+  {{#open-api-url}}
+  static OPENAPI-URL ::= "{{open-api-url}}"
+  {{/open-api-url}}
+
+  static SERVERS ::= [
+    {{#servers}}
+    /**
+    {{description}}
+    */
+    Server --url="{{url}}"
+      {{#variables}
+      --variables={{variables}}
+      {{/variables}}
+    {{/servers}}
+  ]
+
+  {{#paths}}
+  {{#operations}}
+  {{#operation-id}}

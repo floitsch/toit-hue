@@ -7,7 +7,7 @@ import certificate-roots
 import http
 import encoding.json
 import net
-import uuid
+import uuid show Uuid
 import .uri
 import .json-pointer
 import .regex as regex
@@ -1001,7 +1001,7 @@ class SchemaResource_:
     if not id and base-uri:
       id = base-uri.to-string
     else if not id:
-      id = "urn:uuid:$(uuid.uuid5 "json-schema" "$Time.now.ns-since-epoch")"
+      id = "urn:uuid:$(Uuid.uuid5 "json-schema" "$Time.now.ns-since-epoch")"
     // Empty fragments are allowed (but not recommended).
     // Trim them.
     id = id.trim --right "#"
