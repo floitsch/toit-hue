@@ -699,6 +699,17 @@ The path itself is still exposed to the documentation viewer but they will
   not know which operations and parameters are available.
 */
 class PathItem extends Extensionable_:
+  static OPERATION-KINDS ::= [
+    "get",
+    "put",
+    "post",
+    "delete",
+    "options",
+    "head",
+    "patch",
+    "trace",
+  ]
+
   hash-code/int ::= hash-code-counter_++
 
   /**
@@ -761,6 +772,17 @@ class PathItem extends Extensionable_:
   A definition of a TRACE operation on this path.
   */
   trace/Operation?
+
+  operation method/string -> Operation?:
+    if method == "get": return get
+    if method == "put": return put
+    if method == "post": return post
+    if method == "delete": return delete
+    if method == "options": return options
+    if method == "head": return head
+    if method == "patch": return patch
+    if method == "trace": return trace
+    return null
 
   /**
   An alternative $Server list to service all operations in this path.

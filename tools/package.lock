@@ -1,9 +1,17 @@
 sdk: ^2.0.0-alpha.145
 prefixes:
   certificate_roots: toit-cert-roots
+  fs: pkg-fs
   host: pkg-host
   http: pkg-http
 packages:
+  pkg-fs:
+    url: github.com/toitlang/pkg-fs
+    name: fs
+    version: 2.3.1
+    hash: 60836d4500317af2093d59d50c117d612c33f1fa
+    prefixes:
+      host: pkg-host
   pkg-host:
     url: github.com/toitlang/pkg-host
     name: host
