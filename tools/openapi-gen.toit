@@ -257,9 +257,16 @@ class OpenApiGenerator:
     name := namer.reserve-operation path method op
     method-namer := namer.fresh-method-namer
     parameters := (op.parameters or []).map: | param/Parameter |
-      method-namer.reserve-parameter param
+      {
+        "name": method-namer.reserve-parameter param,
+        "description": param.description,
+        "required": param.required,
+      }
+
 
     return {
+      "description": op.description,
+      "deprecated": op.deprecated,
       "name": name,
       "parameters": parameters,
       "tags": op.tags,
