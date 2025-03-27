@@ -31,6 +31,9 @@ class Namer:
   toit-member-name_ name/string -> string:
     return to-kebab-case_ (toit-identifier_ name)
 
+  toit-local-name_ name/string -> string:
+    return to-kebab-case_ (toit-identifier_ name)
+
   toit-identifier_ str/string -> string:
     chars := []
     str.do --runes: | rune/int |
@@ -106,16 +109,15 @@ class Namer:
     return result
 
 class GlobalNamer extends Namer:
-  used-globals_/Set ::= {}
-  globals_/IdentityMap ::= IdentityMap
+  used_/Set ::= {}
   class-namers/Map ::= {:}
 
   reserve name/string --make-unique/bool -> string:
     if make-unique:
-      name = unique_ name: used-globals_.contains name
-    if used-globals_.contains name:
+      name = unique_ name: used_.contains name
+    if used_.contains name:
       throw "Global name already used: $name"
-    used-globals_.add name
+    used_.add name
     return name
 
   reserve-class-name-for-tag-name tag-name/string -> string:
@@ -123,63 +125,71 @@ class GlobalNamer extends Namer:
         toit-class-name_ "$(tag-name)Api"
 
   class-namer class-name/string -> ClassNamer:
-    return class-namers.get class-name --init=:
-      (ClassNamer this)
+    return class-namers.get class-name --init=(: ClassNamer this)
 
 class ClassNamer extends Namer:
-  used-members_/Set ::= {}
-  members_/IdentityMap ::= IdentityMap
+  used_/Set ::= {}
   global/GlobalNamer
 
   constructor .global:
 
-  reserve-static --make-unique/bool name/string -> string:
-    // Statics are in the same namespace as members.
-    return reserve-member name --make-unique=make-unique
-
-  reserve-member --make-unique/bool name/string -> string:
-    if make-unique:
-      name = unique_ name: used-members_.contains it
-    if used-members_.contains name:
-      throw "Name already used: $name"
-    used-members_.add name
+  /** Reservers the given $name, but makes sure it's unique. */
+  reserve_ name/string -> string:
+    name = unique_ name: used_.contains it
+    used_.add name
     return name
 
-  reserve-operation path/string method/string op/Operation -> string:
-    return members_.get op --init=:
-      op-id := op.operation-id
-      name := ?
-      if op-id:
-        name = toit-member-name_ op-id
-      else:
-        name = toit-member-name_ "$path-$method"
-      reserve-member --make-unique name
+  /**
+  Reserves the given $name.
+  This is for function that exist in the template, and thus
+    doesn't make the identifier unique.
+  */
+  reserve name/string -> string:
+    if used_.contains name:
+      throw "Name already used: $name"
+    used_.add name
+    return name
 
+  /**
+  Creates a name for the given operation.
+
+  Prefers to use the $Operation.operation-id. If none exists,
+    uses a name constructed out of the $path and $method instead.
+  */
+  reserve-operation path/string method/string op/Operation -> string:
+    op-id := op.operation-id
+    name := ?
+    if op-id:
+      return reserve_ op-id
+    return reserve_ "$path-$method"
+
+  /**
+  Reserves a field-name for the given $tag-name.
+  */
   reserve-field-name-for-tag-name tag-name/string -> string:
-    return reserve-member --make-unique
-        toit-member-name_ tag-name
+    return reserve_ tag-name
 
   /** A namer for a method of the class. */
-  method-namer -> MethodNamer:
+  fresh-method-namer -> MethodNamer:
     return MethodNamer this
 
 class MethodNamer extends Namer:
-  used-locals_/Set ::= {}
-  locals_/IdentityMap ::= IdentityMap
+  used_/Set ::= {}
   klass/ClassNamer
 
   constructor .klass:
 
-  for-parameter param/Parameter -> string:
-    return locals_.get param --init=:
-      name := param.name
-      if used-locals_.contains name:
-        i := 1
-        while used-locals_.contains "$name-$i":
-          i++
-        name = "$name-$i"
-      used-locals_.add name
-      name
+  reserve_ name/string -> string:
+    id := toit-local-name_ name
+    unique := unique_ id:
+      used_.contains id or
+        klass.used_.contains id or
+        klass.global.used_.contains id
+    used_.add unique
+    return unique
+
+  reserve-parameter param/Parameter -> string:
+    return reserve_ param.name
 
 class OpenApiGenerator:
   base-dir/string
@@ -188,9 +198,16 @@ class OpenApiGenerator:
 
   gen openapi/OpenApi -> Map:
     namer := GlobalNamer
+    // Reserve the import names.
+    ["http", "net", "openapi", "core"].do:
+      namer.reserve it --no-make-unique
+    // Reserve the ApiClient which is always there.
+    namer.reserve "ApiClient" --no-make-unique
+
     api-name := namer.reserve "Api" --no-make-unique
 
     api-namer := namer.class-namer api-name
+    api-namer.reserve "close"
 
     tag-contexts := {:}
     tag-contexts[""] = {
@@ -238,9 +255,9 @@ class OpenApiGenerator:
   // -
   gen-operation path/string method/string op/Operation namer/ClassNamer -> Map:
     name := namer.reserve-operation path method op
-    method-namer := namer.method-namer
+    method-namer := namer.fresh-method-namer
     parameters := (op.parameters or []).map: | param/Parameter |
-      method-namer.for-parameter param
+      method-namer.reserve-parameter param
 
     return {
       "name": name,
