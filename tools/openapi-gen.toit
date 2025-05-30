@@ -262,7 +262,8 @@ class OpenApiGenerator:
         "description": param.description,
         "required": param.required,
       }
-
+    print "REQUEST-BODY: $(op.request-body is RequestBody)"
+    print "REQUEST-REFERENCE: $(op.request-body is Reference)"
 
     return {
       "description": op.description,

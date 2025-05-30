@@ -1,6 +1,6 @@
 import http
 import net
-import .lib.auth as openapi
+import openapi
 
 /**
 The client that does the actual requests.
@@ -76,7 +76,7 @@ class ApiClassName:
   // MUSTACHE: {{^required}}
   // MUSTACHE: op-other-arg={{name}}
       --op-other-arg=null
-  // MUSTACHE:: {{/required}}
+  // MUSTACHE: {{/required}}
   // MUSTACHE: {{/parameters}} Leave parameters
   :
     // TODO.

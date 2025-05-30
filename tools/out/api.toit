@@ -1,6 +1,6 @@
 import http
 import net
-import .lib.auth as openapi
+import openapi
 
 /**
 The client that does the actual requests.
@@ -75,7 +75,6 @@ class PetApi:
   */
   findPetsByStatus
       --status=null
-  // MUSTACHE:: 
   :
     // TODO.
 
@@ -85,7 +84,6 @@ class PetApi:
   */
   findPetsByTags
       --tags=null
-  // MUSTACHE:: 
   :
     // TODO.
 
@@ -95,7 +93,6 @@ class PetApi:
   */
   getPetById
       --pet-id
-
   :
     // TODO.
 
@@ -107,11 +104,8 @@ class PetApi:
   */
   updatePetWithForm
       --pet-id
-
       --name=null
-  // MUSTACHE:: 
       --status=null
-  // MUSTACHE:: 
   :
     // TODO.
 
@@ -122,9 +116,7 @@ class PetApi:
   */
   deletePet
       --api-key=null
-  // MUSTACHE:: 
       --pet-id
-
   :
     // TODO.
 
@@ -135,9 +127,7 @@ class PetApi:
   */
   uploadFile
       --pet-id
-
       --additional-metadata=null
-  // MUSTACHE:: 
   :
     // TODO.
 
@@ -171,7 +161,6 @@ class StoreApi:
   */
   getOrderById
       --order-id
-
   :
     // TODO.
 
@@ -181,7 +170,6 @@ class StoreApi:
   */
   deleteOrder
       --order-id
-
   :
     // TODO.
 
@@ -216,9 +204,7 @@ class UserApi:
   */
   loginUser
       --username=null
-  // MUSTACHE:: 
       --password=null
-  // MUSTACHE:: 
   :
     // TODO.
 
@@ -235,7 +221,6 @@ class UserApi:
   */
   getUserByName
       --username
-
   :
     // TODO.
 
@@ -245,7 +230,6 @@ class UserApi:
   */
   updateUser
       --username
-
   :
     // TODO.
 
@@ -255,7 +239,6 @@ class UserApi:
   */
   deleteUser
       --username
-
   :
     // TODO.
 

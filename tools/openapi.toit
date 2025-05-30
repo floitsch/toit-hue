@@ -19,7 +19,7 @@ class Extensionable_:
     defined by the OpenAPI Initiative.
   Values can be `null`, a primitive, a $List or a $Map.
   */
-  extensions/Map?  // from string (starting with "x-" to any.
+  extensions/Map?  // From string (starting with "x-" to any.
 
   constructor --.extensions:
 
@@ -138,7 +138,7 @@ class OpenApi extends Extensionable_:
     object describes a request that may be initiated by the API provider
     and the expected responses.
   */
-  webhooks/Map?  // from string to PathItem.
+  webhooks/Map?  // From string to PathItem.
 
   /**
   An element to hold various schemas for the document.
@@ -444,7 +444,7 @@ class Server extends Extensionable_:
   A map between a variable name and its value.
   The value is used for substitution in the server's URL template.
   */
-  variables/Map?  // from string to ServerVariable.
+  variables/Map?  // From string to ServerVariable.
 
   constructor
       --.url
@@ -540,37 +540,37 @@ class Components extends Extensionable_:
   hash-code/int ::= hash-code-counter_++
 
   /** An object to hold reusable $Schema objects. */
-  schemas/Map? // from string to Schema.
+  schemas/Map? // From string to Schema.
 
   /** An object to hold reusable $Response objects. */
-  responses/Map? // from string to Response or Reference.
+  responses/Map? // From string to ResponseOrReference.
 
   /** An object to hold reusable $Parameter objects. */
-  parameters/Map? // from string to Parameter or Reference.
+  parameters/Map? // From string to ParameterOrReference.
 
   /** An object to hold reusable $Example objects. */
-  examples/Map? // from string to Example or Reference.
+  examples/Map? // From string to ExampleOrReference.
 
   /** An object to hold reusable $RequestBody objects. */
-  request-bodies/Map? // from string to RequestBody or Reference.
+  request-bodies/Map? // From string to RequestBodyOrReference.
 
   /**
   An object to hold reusable $Parameter objects, for which the field
     $Parameter.is-header is set.
   */
-  headers/Map? // from string to Header or Reference.
+  headers/Map? // From string to ParameterOrReference.
 
   /** An object to hold reusable $SecurityScheme objects. */
-  security-schemes/Map? // from string to SecurityScheme or Reference.
+  security-schemes/Map? // From string to SecuritySchemeOrReference.
 
   /** An object to hold reusable $Link objects. */
-  links/Map? // from string to Link or Reference.
+  links/Map? // From string to LinkOrReference.
 
   /** An object to hold reusable $Callback objects. */
-  callbacks/Map? // from string to Callback or Reference.
+  callbacks/Map? // From string to CallbackOrReference.
 
   /** An object to hold reusable $PathItem objects. */
-  path-items/Map? // from string to PathItem.
+  path-items/Map? // From string to PathItemOrReference.
 
   constructor
       --.schemas=null
@@ -698,7 +698,7 @@ A path item may be empty, due to Access Control List (ACL) constraints.
 The path itself is still exposed to the documentation viewer but they will
   not know which operations and parameters are available.
 */
-class PathItem extends Extensionable_:
+class PathItem extends Extensionable_ implements PathItemOrReference:
   static OPERATION-KINDS ::= [
     "get",
     "put",
@@ -710,6 +710,7 @@ class PathItem extends Extensionable_:
     "trace",
   ]
 
+  resolved-path-item -> PathItem: return this
   hash-code/int ::= hash-code-counter_++
 
   /**
@@ -799,7 +800,7 @@ class PathItem extends Extensionable_:
   The list can use the $Reference Object to link to parameters that are
     defined at the $Components.parameters level.
   */
-  parameters/List?  // of Parameter or Reference.
+  parameters/List?  // Of ParameterOrReference.
 
   constructor
       --.ref=null
@@ -911,7 +912,7 @@ class Operation extends Extensionable_:
   The list can use the $Reference Object to link to parameters that are
     defined at the $Components.parameters level.
   */
-  parameters/List?  // of Parameter or Reference.
+  parameters/List?  // Of ParameterOrReference.
 
   /**
   The request body applicable for this operation.
@@ -922,7 +923,7 @@ class Operation extends Extensionable_:
     and `DELETE`), a $request-body is permitted but does not have
     well-defined semantics and should be avoided if possible.
   */
-  request-body/any  // Either a RequestBody or a Reference.
+  request-body/RequestBodyOrReference
 
   /**
   The list of possible responses as they are returned from executing this operation.
@@ -935,7 +936,7 @@ class Operation extends Extensionable_:
   Each value in the map is a $Callback Object that describes a request
     that may be initiated by the API provider and the expected responses.
   */
-  callbacks/Map?  // from string to Callback or Reference.
+  callbacks/Map?  // From string to CallbackOrReference.
 
   /**
   Declares this operation to be deprecated.
@@ -1104,7 +1105,9 @@ Headers are the same as parameters, except for the following differences:
   propagates the name.
 - The $Parameter.in is implicitly set to $HEADER.
 */
-class Parameter extends Extensionable_:
+class Parameter extends Extensionable_ implements ParameterOrReference:
+  resolved-parameter -> Parameter: return this
+
   hash-code/int ::= hash-code-counter_++
 
   static PATH ::= "path"
@@ -1360,7 +1363,7 @@ class Parameter extends Extensionable_:
   If referencing a $schema that contains an example, the
     examples value shall override the example provided by the schema.
   */
-  examples/Map?  // From string to Example or Reference.
+  examples/Map?  // From string to ExampleOrReference.
 
   /**
   A map containing the representations for the parameter.
@@ -1462,7 +1465,9 @@ class Parameter extends Extensionable_:
 /**
 A single request body.
 */
-class RequestBody extends Extensionable_:
+class RequestBody extends Extensionable_ implements RequestBodyOrReference:
+  resolved-request-body -> RequestBody: return this
+
   hash-code/int ::= hash-code-counter_++
 
   /**
@@ -1543,7 +1548,7 @@ class MediaType extends Extensionable_:
   If referencing a $schema that contains an example, the
     examples value shall override the example provided by the schema.
   */
-  examples/Map?  // From string to Example or Reference.
+  examples/Map?  // From string to ExampleOrReference.
 
   /**
   A map between a property name and its encoding information.
@@ -1725,7 +1730,7 @@ class Responses extends Extensionable_:
 
   It can be used to cover undeclared responses.
   */
-  default/any  // Either a Response or a Reference.
+  default/any  // A ResponseOrReference.
 
   /**
   A map from status code (string) to the expected response.
@@ -1736,7 +1741,7 @@ class Responses extends Extensionable_:
   If a response is defined using an explicit code, then the explicit code
     takes precedence over the range definition for that code.
   */
-  responses/Map  // From string to Response or Reference.
+  responses/Map  // From string to ResponseOrReference.
 
   constructor --.default=null --.responses={:} --extensions/Map?=null:
     if not default and responses.size == 0:
@@ -1783,7 +1788,9 @@ class Responses extends Extensionable_:
 A single response from an API Operation, including design-time, static
   links to operations based on the response.
 */
-class Response extends Extensionable_:
+class Response extends Extensionable_ implements ResponseOrReference:
+  resolved-response -> Response: return this
+
   hash-code/int ::= hash-code-counter_++
 
   /**
@@ -1801,7 +1808,7 @@ class Response extends Extensionable_:
 
   If a response header is defined with the name "Content-Type", it is ignored.
   */
-  headers/Map?  // From string to Header or Reference.
+  headers/Map?  // From string to ParameterOrReference.
 
   /**
   A map containing descriptions of potential response payloads.
@@ -1818,7 +1825,7 @@ class Response extends Extensionable_:
   The key of the map is a short name for the link, following the naming
     constraints of the names for Component Objects.
   */
-  links/Map?  // From string to Link or Reference.
+  links/Map?  // From string to LinkOrReference.
 
   constructor --.description=null --.headers=null --.content --.links=null --extensions/Map?=null:
     super --extensions=extensions
@@ -1883,7 +1890,8 @@ class RuntimeExpression:
 /**
 A map of possible out-of band callbacks related to the parent operation.
 */
-class Callback extends Extensionable_:
+class Callback extends Extensionable_ implements CallbackOrReference:
+  resolved-callback -> Callback: return this
   hash-code/int ::= hash-code-counter_++
 
   /**
@@ -1897,7 +1905,7 @@ class Callback extends Extensionable_:
   See $OpenApi.webhooks to describe incoming requests from the API provider
     independent from another API call.
   */
-  callbacks/Map  // From RuntimeExpression to PathItem or Reference.
+  callbacks/Map  // From RuntimeExpression to PathItemOrReference.
 
   constructor --.callbacks --extensions/Map?=null:
     super --extensions=extensions
@@ -1923,7 +1931,9 @@ class Callback extends Extensionable_:
 /**
 An example for the API operation.
 */
-class Example extends Extensionable_:
+class Example extends Extensionable_ implements ExampleOrReference:
+  resolved-example -> Example: return this
+
   hash-code/int ::= hash-code-counter_++
 
   /** A short description of the example. */
@@ -1980,7 +1990,8 @@ class Example extends Extensionable_:
     add-extensions-to-json_ result
     return result
 
-class Link extends Extensionable_:
+class Link extends Extensionable_ implements LinkOrReference:
+  resolved-link -> Link: return this
   hash-code/int ::= hash-code-counter_++
 
   /**
@@ -2123,6 +2134,30 @@ class Tag extends Extensionable_:
     add-extensions-to-json_ result
     return result
 
+interface ResponseOrReference:
+  resolved-response -> Response
+
+interface ParameterOrReference:
+  resolved-parameter -> Parameter
+
+interface ExampleOrReference:
+  resolved-example -> Example
+
+interface RequestBodyOrReference:
+  resolved-request-body -> RequestBody
+
+interface SecuritySchemeOrReference:
+  resolved-security-scheme -> SecurityScheme
+
+interface LinkOrReference:
+  resolved-link -> Link
+
+interface CallbackOrReference:
+  resolved-callback -> Callback
+
+interface PathItemOrReference:
+  resolved-path-item -> PathItem
+
 /**
 A simple object to allow referencing other components in the OpenAPI
   document; internally and externally.
@@ -2135,7 +2170,7 @@ See [Reference Object](https://spec.openapis.org/oas/v3.1.0#relativeReferencesUR
 
 Note: this class does not allow to be extended.
 */
-class Reference:
+class Reference implements ResponseOrReference:
   hash-code/int ::= hash-code-counter_++
 
   static RESPONSE ::= 1
@@ -2190,35 +2225,35 @@ class Reference:
     context.references.add reference
     return reference
 
-  response -> Response:
+  resolved-response -> Response:
     if kind != RESPONSE: throw "Reference is not a response"
     return resolved_
 
-  parameter -> Parameter:
+  resolved-parameter -> Parameter:
     if kind != PARAMETER: throw "Reference is not a parameter"
     return resolved_
 
-  example -> Example:
+  resolved-example -> Example:
     if kind != EXAMPLE: throw "Reference is not an example"
     return resolved_
 
-  request-body -> RequestBody:
+  resolved-request-body -> RequestBody:
     if kind != REQUEST-BODY: throw "Reference is not a request body"
     return resolved_
 
-  security-scheme -> SecurityScheme:
+  resolved-security-scheme -> SecurityScheme:
     if kind != SECURITY-SCHEME: throw "Reference is not a security scheme"
     return resolved_
 
-  link -> Link:
+  resolved-link -> Link:
     if kind != LINK: throw "Reference is not a link"
     return resolved_
 
-  callback -> Callback:
+  resolved-callback -> Callback:
     if kind != CALLBACK: throw "Reference is not a callback"
     return resolved_
 
-  path-item -> PathItem:
+  resolved-path-item -> PathItem:
     if kind != PATH-ITEM: throw "Reference is not a path item"
     return resolved_
 
@@ -2255,14 +2290,15 @@ A security scheme that can be used by the operations.
 
 The following security schemes are supported by OpenAPI:
 - HTTP authentication.
-- An API key (either as a header or as a query parameter).
+- An API key (either as a header ($Parameter) or as a query parameter).
 - Mutual TLS (use of a client certificate).
 - OAuth2's common flows: implicit (deprecated), password, client credentials
   and authorization code.
   Defined in [RFC6749](https://datatracker.ietf.org/doc/html/rfc6749).
 - OpenID Connect Discovery.
 */
-class SecurityScheme extends Extensionable_:
+class SecurityScheme extends Extensionable_ implements SecuritySchemeOrReference:
+  resolved-security-scheme -> SecurityScheme: return this
   hash-code/int ::= hash-code-counter_++
 
   static API-KEY ::= "apiKey"
