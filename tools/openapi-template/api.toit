@@ -63,7 +63,7 @@ class ApiClassName:
   // MUSTACHE: {{/deprecated}}
   // MUSTACHE: {{#parameters}}
   // MUSTACHE: op-arg={{name}}
-  // MUSTACHE: param-description={{param-description}}
+  // MUSTACHE: param-description={{description}}
   - $op-arg: param-description
   // MUSTACHE: {{/parameters}}
   */

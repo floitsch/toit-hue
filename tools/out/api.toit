@@ -71,7 +71,7 @@ class PetApi:
 
   /**
   Multiple status values can be provided with comma separated strings
-  - $status: 
+  - $status: Status values that need to be considered for filter
   */
   find-pets-by-status
       --status=null
@@ -80,7 +80,7 @@ class PetApi:
 
   /**
   Multiple tags can be provided with comma separated strings. Use tag1, tag2, tag3 for testing.
-  - $tags: 
+  - $tags: Tags to filter by
   */
   find-pets-by-tags
       --tags=null
@@ -89,7 +89,7 @@ class PetApi:
 
   /**
   Returns a single pet
-  - $pet-id: 
+  - $pet-id: ID of pet to return
   */
   get-pet-by-id
       --pet-id
@@ -98,9 +98,9 @@ class PetApi:
 
   /**
   
-  - $pet-id: 
-  - $name: 
-  - $status: 
+  - $pet-id: ID of pet that needs to be updated
+  - $name: Name of pet that needs to be updated
+  - $status: Status of pet that needs to be updated
   */
   update-pet-with-form
       --pet-id
@@ -112,7 +112,7 @@ class PetApi:
   /**
   
   - $api-key: 
-  - $pet-id: 
+  - $pet-id: Pet id to delete
   */
   delete-pet
       --api-key=null
@@ -122,8 +122,8 @@ class PetApi:
 
   /**
   
-  - $pet-id: 
-  - $additional-metadata: 
+  - $pet-id: ID of pet to update
+  - $additional-metadata: Additional Metadata
   */
   upload-file
       --pet-id
@@ -157,7 +157,7 @@ class StoreApi:
 
   /**
   For valid response try integer IDs with value &lt;= 5 or &gt; 10. Other values will generate exceptions.
-  - $order-id: 
+  - $order-id: ID of order that needs to be fetched
   */
   get-order-by-id
       --order-id
@@ -166,7 +166,7 @@ class StoreApi:
 
   /**
   For valid response try integer IDs with value &lt; 1000. Anything above 1000 or nonintegers will generate API errors
-  - $order-id: 
+  - $order-id: ID of the order that needs to be deleted
   */
   delete-order
       --order-id
@@ -199,8 +199,8 @@ class UserApi:
 
   /**
   
-  - $username: 
-  - $password: 
+  - $username: The user name for login
+  - $password: The password for login in clear text
   */
   login-user
       --username=null
@@ -217,7 +217,7 @@ class UserApi:
 
   /**
   
-  - $username: 
+  - $username: The name that needs to be fetched. Use user1 for testing. 
   */
   get-user-by-name
       --username
@@ -226,7 +226,7 @@ class UserApi:
 
   /**
   This can only be done by the logged in user.
-  - $username: 
+  - $username: name that needs to be updated
   */
   update-user
       --username
@@ -235,7 +235,7 @@ class UserApi:
 
   /**
   This can only be done by the logged in user.
-  - $username: 
+  - $username: The name that needs to be deleted
   */
   delete-user
       --username
