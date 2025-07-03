@@ -1,11 +1,13 @@
 import http
 import encoding.base64
 
+import .query-params
+
 interface Authentication:
   /**
   Applies the authentication to the $query-params and $header-params.
   */
-  apply-to-params --query-params/Map --header-params/http.Headers
+  apply-to-params --query-params/List --header-params/http.Headers
 
 class ApiKeyAuth implements Authentication:
   location/string
@@ -20,7 +22,7 @@ class ApiKeyAuth implements Authentication:
       --.api-key-prefix=""
       --.api-key="":
 
-  apply-to-params --query-params/Map --header-params/http.Headers:
+  apply-to-params --query-params/List --header-params/http.Headers:
     param-value := api-key-prefix == ""
         ? api-key
         : "$api-key-prefix $api-key"
@@ -28,7 +30,7 @@ class ApiKeyAuth implements Authentication:
     if param-value == "": return
 
     if location == "query":
-      query-params[param-name] = param-value
+      query-params.add (QueryParam param-name param-value)
     else if location == "header":
       header-params.add param-name param-value
     else if location == "cookie":
@@ -51,7 +53,7 @@ class HttpBasicAuth implements Authentication:
 
   constructor --.username --.password:
 
-  apply-to-params --query-params/Map --header-params/http.Headers:
+  apply-to-params --query-params/List --header-params/http.Headers:
     if username == "" or password == "": return
 
     credentials := "$username:$password"
@@ -69,7 +71,7 @@ abstract class HttpBearerAuth implements Authentication:
 
   constructor.from-sub_:
 
-  apply-to-params --query-params/Map --header-params/http.Headers:
+  apply-to-params --query-params/List --header-params/http.Headers:
     if not access-token_: access-token_ = get-access-token_
     if access-token_ == "": return
 
@@ -99,7 +101,7 @@ class OAuth implements Authentication:
 
   constructor .access-token:
 
-  apply-to-params --query-params/Map --header-params/http.Headers:
+  apply-to-params --query-params/List --header-params/http.Headers:
     if access-token == "": return
 
     header-params.add "Authorization" "Bearer $access-token"

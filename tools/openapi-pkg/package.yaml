@@ -1,2 +1,6 @@
 name: openapi
 description: Support package for openapi generated Toit libraries.
+dependencies:
+  http:
+    url: github.com/toitlang/pkg-http
+    version: ^2.9.0

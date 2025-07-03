@@ -66,6 +66,11 @@ class ApiClassName:
   // MUSTACHE: param-description={{description}}
   - $op-arg: param-description
   // MUSTACHE: {{/parameters}}
+  // MUSTACHE: {{#request-body}}
+  // MUSTACHE: body-arg={{name}}
+  // MUSTACHE: body-description={{description}}
+  - $body-arg: body-description
+  // MUSTACHE: {{/request-body}}
   */
   op-name
   // MUSTACHE: {{#parameters}} Enter parameters
@@ -78,6 +83,9 @@ class ApiClassName:
       --op-other-arg=null
   // MUSTACHE: {{/required}}
   // MUSTACHE: {{/parameters}} Leave parameters
+  // MUSTACHE: {{#request-body}}
+      body-arg
+  // MUSTACHE: {{/request-body}}
   :
     // TODO.
 

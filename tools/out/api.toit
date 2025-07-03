@@ -57,15 +57,19 @@ class PetApi:
 
   /**
   Update an existing pet by Id
+  - $body: Update an existent pet in the store
   */
   update-pet
+      body
   :
     // TODO.
 
   /**
   Add a new pet to the store
+  - $body: Create a new pet in the store
   */
   add-pet
+      body
   :
     // TODO.
 
@@ -124,10 +128,12 @@ class PetApi:
   
   - $pet-id: ID of pet to update
   - $additional-metadata: Additional Metadata
+  - $body: 
   */
   upload-file
       --pet-id
       --additional-metadata=null
+      body
   :
     // TODO.
 
@@ -150,8 +156,10 @@ class StoreApi:
 
   /**
   Place a new order in the store
+  - $body: 
   */
   place-order
+      body
   :
     // TODO.
 
@@ -185,15 +193,19 @@ class UserApi:
 
   /**
   This can only be done by the logged in user.
+  - $body: Created user object
   */
   create-user
+      body
   :
     // TODO.
 
   /**
   Creates list of users with given input array
+  - $body: 
   */
   create-users-with-list-input
+      body
   :
     // TODO.
 
@@ -227,9 +239,11 @@ class UserApi:
   /**
   This can only be done by the logged in user.
   - $username: name that needs to be updated
+  - $body: Update an existent user in the store
   */
   update-user
       --username
+      body
   :
     // TODO.
 

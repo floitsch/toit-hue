@@ -264,12 +264,21 @@ class OpenApiGenerator:
       }
     print "REQUEST-BODY: $(op.request-body is RequestBody)"
     print "REQUEST-REFERENCE: $(op.request-body is Reference)"
+    request-body/Map? := null
+    if op.request-body:
+      resolved := op.request-body.resolved-request-body
+      // TODO(florian): get type from content.
+      request-body = {
+        "description": resolved.description,
+        "name": method-namer.reserve_ "body",
+      }
 
     return {
       "description": op.description,
       "deprecated": op.deprecated,
       "name": name,
       "parameters": parameters,
+      "request-body": request-body,
       "tags": op.tags,
     }
 
