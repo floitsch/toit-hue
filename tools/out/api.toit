@@ -58,14 +58,14 @@ class PetApi:
   /**
   Update an existing pet by Id
   */
-  updatePet
+  update-pet
   :
     // TODO.
 
   /**
   Add a new pet to the store
   */
-  addPet
+  add-pet
   :
     // TODO.
 
@@ -73,7 +73,7 @@ class PetApi:
   Multiple status values can be provided with comma separated strings
   - $status: 
   */
-  findPetsByStatus
+  find-pets-by-status
       --status=null
   :
     // TODO.
@@ -82,7 +82,7 @@ class PetApi:
   Multiple tags can be provided with comma separated strings. Use tag1, tag2, tag3 for testing.
   - $tags: 
   */
-  findPetsByTags
+  find-pets-by-tags
       --tags=null
   :
     // TODO.
@@ -91,7 +91,7 @@ class PetApi:
   Returns a single pet
   - $pet-id: 
   */
-  getPetById
+  get-pet-by-id
       --pet-id
   :
     // TODO.
@@ -102,7 +102,7 @@ class PetApi:
   - $name: 
   - $status: 
   */
-  updatePetWithForm
+  update-pet-with-form
       --pet-id
       --name=null
       --status=null
@@ -114,7 +114,7 @@ class PetApi:
   - $api-key: 
   - $pet-id: 
   */
-  deletePet
+  delete-pet
       --api-key=null
       --pet-id
   :
@@ -125,7 +125,7 @@ class PetApi:
   - $pet-id: 
   - $additional-metadata: 
   */
-  uploadFile
+  upload-file
       --pet-id
       --additional-metadata=null
   :
@@ -144,14 +144,14 @@ class StoreApi:
   /**
   Returns a map of status codes to quantities
   */
-  getInventory
+  get-inventory
   :
     // TODO.
 
   /**
   Place a new order in the store
   */
-  placeOrder
+  place-order
   :
     // TODO.
 
@@ -159,7 +159,7 @@ class StoreApi:
   For valid response try integer IDs with value &lt;= 5 or &gt; 10. Other values will generate exceptions.
   - $order-id: 
   */
-  getOrderById
+  get-order-by-id
       --order-id
   :
     // TODO.
@@ -168,7 +168,7 @@ class StoreApi:
   For valid response try integer IDs with value &lt; 1000. Anything above 1000 or nonintegers will generate API errors
   - $order-id: 
   */
-  deleteOrder
+  delete-order
       --order-id
   :
     // TODO.
@@ -186,14 +186,14 @@ class UserApi:
   /**
   This can only be done by the logged in user.
   */
-  createUser
+  create-user
   :
     // TODO.
 
   /**
   Creates list of users with given input array
   */
-  createUsersWithListInput
+  create-users-with-list-input
   :
     // TODO.
 
@@ -202,7 +202,7 @@ class UserApi:
   - $username: 
   - $password: 
   */
-  loginUser
+  login-user
       --username=null
       --password=null
   :
@@ -211,7 +211,7 @@ class UserApi:
   /**
   
   */
-  logoutUser
+  logout-user
   :
     // TODO.
 
@@ -219,7 +219,7 @@ class UserApi:
   
   - $username: 
   */
-  getUserByName
+  get-user-by-name
       --username
   :
     // TODO.
@@ -228,7 +228,7 @@ class UserApi:
   This can only be done by the logged in user.
   - $username: 
   */
-  updateUser
+  update-user
       --username
   :
     // TODO.
@@ -237,7 +237,7 @@ class UserApi:
   This can only be done by the logged in user.
   - $username: 
   */
-  deleteUser
+  delete-user
       --username
   :
     // TODO.

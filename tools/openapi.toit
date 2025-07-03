@@ -923,7 +923,7 @@ class Operation extends Extensionable_:
     and `DELETE`), a $request-body is permitted but does not have
     well-defined semantics and should be avoided if possible.
   */
-  request-body/RequestBodyOrReference
+  request-body/RequestBodyOrReference?
 
   /**
   The list of possible responses as they are returned from executing this operation.
@@ -2136,27 +2136,35 @@ class Tag extends Extensionable_:
 
 interface ResponseOrReference:
   resolved-response -> Response
+  to-json -> any
 
 interface ParameterOrReference:
   resolved-parameter -> Parameter
+  to-json -> any
 
 interface ExampleOrReference:
   resolved-example -> Example
+  to-json -> any
 
 interface RequestBodyOrReference:
   resolved-request-body -> RequestBody
+  to-json -> any
 
 interface SecuritySchemeOrReference:
   resolved-security-scheme -> SecurityScheme
+  to-json -> any
 
 interface LinkOrReference:
   resolved-link -> Link
+  to-json -> any
 
 interface CallbackOrReference:
   resolved-callback -> Callback
+  to-json -> any
 
 interface PathItemOrReference:
   resolved-path-item -> PathItem
+  to-json -> any
 
 /**
 A simple object to allow referencing other components in the OpenAPI

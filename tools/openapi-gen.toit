@@ -160,14 +160,14 @@ class ClassNamer extends Namer:
     op-id := op.operation-id
     name := ?
     if op-id:
-      return reserve_ op-id
+      return reserve_ (to-kebab-case_ op-id)
     return reserve_ "$path-$method"
 
   /**
   Reserves a field-name for the given $tag-name.
   */
   reserve-field-name-for-tag-name tag-name/string -> string:
-    return reserve_ tag-name
+    return reserve_ (to-kebab-case_ tag-name)
 
   /** A namer for a method of the class. */
   fresh-method-namer -> MethodNamer:
