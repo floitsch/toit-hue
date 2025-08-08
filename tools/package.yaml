@@ -11,3 +11,6 @@ dependencies:
   http:
     url: github.com/toitlang/pkg-http
     version: ^2.7.2
+  mustache:
+    url: github.com/toitware/toit-mustache
+    version: ^1.0.1

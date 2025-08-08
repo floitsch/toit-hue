@@ -2,9 +2,9 @@ import encoding.yaml
 import fs
 import host.file
 import io
+import mustache
 import system
 
-import .mustache.src.mustache as mustache
 import .openapi
 import .openapi-gen.template-to-mustache show template-to-mustache
 
@@ -251,19 +251,22 @@ class OpenApiGenerator:
       "apis": tag-contexts.values
     }
 
-  // TODO(florian):
-  // -
   gen-operation path/string method/string op/Operation namer/ClassNamer -> Map:
     name := namer.reserve-operation path method op
     method-namer := namer.fresh-method-namer
+    // For each operation we have a '--raw' version.
+    method-namer.reserve_ "raw"
     parameters := (op.parameters or []).map: | param/Parameter |
       {
         "name": method-namer.reserve-parameter param,
         "description": param.description,
         "required": param.required,
+        "original-name": param.name,
+        "in-path": param.in == Parameter.PATH,
+        "in-query": param.in == Parameter.QUERY,
+        "in-header": param.in == Parameter.HEADER,
+        "in-cookie": param.in == Parameter.COOKIE,
       }
-    print "REQUEST-BODY: $(op.request-body is RequestBody)"
-    print "REQUEST-REFERENCE: $(op.request-body is Reference)"
     request-body/Map? := null
     if op.request-body:
       resolved := op.request-body.resolved-request-body
@@ -274,6 +277,8 @@ class OpenApiGenerator:
       }
 
     return {
+      "method": method,
+      "path": path,
       "description": op.description,
       "deprecated": op.deprecated,
       "name": name,

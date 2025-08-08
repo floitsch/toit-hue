@@ -35,7 +35,7 @@ class ApiClient:
       --path/string
       --method/string
       --query-params/List  // of QueryParam
-      --body/Object?
+      --body/Object?=null
       --header-params/Headers
       --form-params/Map  // of string to string
       --content-type/string?

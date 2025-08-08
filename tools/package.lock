@@ -4,6 +4,7 @@ prefixes:
   fs: pkg-fs
   host: pkg-host
   http: pkg-http
+  mustache: toit-mustache
 packages:
   pkg-fs:
     url: github.com/toitlang/pkg-fs
@@ -27,3 +28,8 @@ packages:
     name: certificate_roots
     version: 1.6.1
     hash: 55d3be82ed53d8d332338b2de931865cf69fe48b
+  toit-mustache:
+    url: github.com/toitware/toit-mustache
+    name: mustache
+    version: 1.0.1
+    hash: 5ea517435f5b85864c36f69f87b0dc0a46fc3eaa

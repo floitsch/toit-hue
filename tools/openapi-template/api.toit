@@ -2,29 +2,16 @@ import http
 import net
 import openapi
 
-/**
-The client that does the actual requests.
-*/
-class ApiClient:
-  client_/http.Client? := ?
+// MUSTACHE: X-ServiceName-x={{api-name}} provided by the user not the document.
+class X-ServiceName-x:
+  api-client_/openapi.ApiClient? := ?
 
-  constructor network/net.Client:
-    client_ = http.Client network
-
-  close:
-    if client_:
-      client_.close
-      client_ = null
-
-// MUSTACHE: ServiceName={{api-name}} provided by the user not the document.
-class ServiceName:
-  api-client_/ApiClient? := ?
-
-  constructor --api-client/ApiClient:
+  constructor --api-client/openapi.ApiClient:
     api-client_ = api-client
 
   constructor network/net.Client:
-    api-client_ = ApiClient network
+    // TODO(florian): provide base-path.
+    api-client_ = openapi.ApiClient network --base-path=""
 
   close -> none:
     if not api-client_: return
@@ -32,61 +19,125 @@ class ServiceName:
     api-client_ = null
 
   // MUSTACHE: {{#apis}} Enter apis.
-  // MUSTACHE: api-name={{field-name}}
-  // MUSTACHE: ApiClassName={{class-name}}
-  api-name_/ApiClassName? := null
-  api-name -> ApiClassName:
-    if not api-name_: api-name_ = ApiClassName api-client_
-    return api-name_
+  // MUSTACHE: x-api-name-x={{field-name}}
+  // MUSTACHE: X-ApiClassName-x={{class-name}}
+  x-api-name-x_/X-ApiClassName-x? := null
+  x-api-name-x -> X-ApiClassName-x:
+    if not x-api-name-x_: x-api-name-x_ = X-ApiClassName-x api-client_
+    return x-api-name-x_
 
   // MUSTACHE: {{/apis}} Leave apis
 
 // MUSTACHE: {{#apis}} Enter apis.
-// MUSTACHE: ApiClassName={{class-name}}
-// MUSTACHE: BASE-PATH={{{base-path}}}
-class ApiClassName:
+// MUSTACHE: X-ApiClassName-x={{class-name}}
+class X-ApiClassName-x:
   authentication/openapi.Authentication?
 
-  api-client_/ApiClient
+  api-client_/openapi.ApiClient
   // group_/GroupedApi? := null
 
   constructor .api-client_
       --.authentication=null:
 
   // MUSTACHE: {{#operations}} Enter operations.
-  // MUSTACHE: op-name={{name}}
+  // MUSTACHE: x-op-name-x={{name}}
+
   /**
-  // MUSTACHE: op-toit-doc={{description}}
-  op-toit-doc
-  // MUSTACHE: {{#deprecated}}
-  Deprecated.
-  // MUSTACHE: {{/deprecated}}
-  // MUSTACHE: {{#parameters}}
-  // MUSTACHE: op-arg={{name}}
-  // MUSTACHE: param-description={{description}}
-  - $op-arg: param-description
-  // MUSTACHE: {{/parameters}}
-  // MUSTACHE: {{#request-body}}
-  // MUSTACHE: body-arg={{name}}
-  // MUSTACHE: body-description={{description}}
-  - $body-arg: body-description
-  // MUSTACHE: {{/request-body}}
+  Variant of $x-op-name-x that takes a raw body and
+    returns the raw response.
   */
-  op-name
+  x-op-name-x --raw
   // MUSTACHE: {{#parameters}} Enter parameters
   // MUSTACHE: {{#required}}
-  // MUSTACHE: op-arg={{name}}
-      --op-arg
+  // MUSTACHE: x-op-arg-x={{name}}
+      --x-op-arg-x
   // MUSTACHE: {{/required}}
   // MUSTACHE: {{^required}}
-  // MUSTACHE: op-other-arg={{name}}
-      --op-other-arg=null
+  // MUSTACHE: x-op-other-arg-x={{name}}
+      --x-op-other-arg-x=null
   // MUSTACHE: {{/required}}
   // MUSTACHE: {{/parameters}} Leave parameters
   // MUSTACHE: {{#request-body}}
       body-arg
   // MUSTACHE: {{/request-body}}
   :
+    // MUSTACHE: x-api-path-x={{{path}}}
+    // MUSTACHE: x-api-method-x={{method}}
+    path := "x-api-path-x"
+    headers := http.Headers
+    query-params := []
+    cookie-params := []
+
+    // MUSTACHE: {{#parameters}}
+    // MUSTACHE: x-orig-arg-x={{{original-name}}}
+    // MUSTACHE: {{#in-path}}
+    path = path.replace --all "{$("x-orig-arg-x")}" "$x-op-arg-x"
+    // MUSTACHE: {{/in-path}}
+    // MUSTACHE: {{#in-query}}
+    query-params.add (openapi.QueryParam "x-orig-arg-x" x-op-arg-x)
+    // MUSTACHE: {{/in-query}}
+    // MUSTACHE: {{#in-header}}
+    headers.set "x-orig-arg-x" x-op-arg-x
+    // MUSTACHE: {{/in-header}}
+    // MUSTACHE: {{#in-cookie}}
+    cookie-params.add "x-orig-arg-x=$x-op-arg-x"
+    // MUSTACHE: {{/in-cookie}}
+    // MUSTACHE: {{/parameters}}
+
+    if not cookie-params.is-empty:
+      headers.set "Cookie" (cookie-params.join "; ")
+
+    return api-client_.invoke-api
+        --path=path
+        --method="x-api-method-x"
+        --query-params=query-params
+        // MUSTACHE: {{#request-body}}
+        --body=body-arg
+        // MUSTACHE: {{/request-body}}
+        --header-params=http.Headers
+        --form-params={:}
+        --content-type=null
+
+  /**
+  // MUSTACHE: x-op-toit-doc-x={{{description}}}
+  x-op-toit-doc-x
+  // MUSTACHE: {{#deprecated}}
+  Deprecated.
+  // MUSTACHE: {{/deprecated}}
+  // MUSTACHE: {{#parameters}}
+  // MUSTACHE: x-op-arg-x={{name}}
+  // MUSTACHE: x-param-description-x={{{description}}}
+  - $x-op-arg-x: x-param-description-x
+  // MUSTACHE: {{/parameters}}
+  // MUSTACHE: {{#request-body}}
+  // MUSTACHE: x-body-arg-x={{name}}
+  // MUSTACHE: x-body-description-x={{{description}}}
+  - $body-arg: x-body-description-x
+  // MUSTACHE: {{/request-body}}
+  */
+  x-op-name-x
+      // MUSTACHE: {{#parameters}} Enter parameters
+      // MUSTACHE: {{#required}}
+      // MUSTACHE: x-op-arg-x={{name}}
+      --x-op-arg-x
+      // MUSTACHE: {{/required}}
+      // MUSTACHE: {{^required}}
+      // MUSTACHE: x-op-other-arg-x={{name}}
+      --x-op-other-arg-x=null
+      // MUSTACHE: {{/required}}
+      // MUSTACHE: {{/parameters}} Leave parameters
+      // MUSTACHE: {{#request-body}}
+      body-arg
+      // MUSTACHE: {{/request-body}}
+  :
+    // TODO.
+    raw := x-op-name-x --raw
+        // MUSTACHE: {{#parameters}}
+        --x-op-arg-x=x-op-arg-x
+        // MUSTACHE: {{/parameters}}
+        // MUSTACHE: {{#request-body}}
+        body-arg
+        // MUSTACHE: {{/request-body}}
     // TODO.
 
   // MUSTACHE: {{/operations}} Leave operations
