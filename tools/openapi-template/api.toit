@@ -69,23 +69,34 @@ class X-ApiClassName-x:
     cookie-params := []
 
     // MUSTACHE: {{#parameters}}
-    // MUSTACHE: x-orig-arg-x={{{original-name}}}
-    // MUSTACHE: {{#in-path}}
-    path = path.replace --all "{$("x-orig-arg-x")}" "$x-op-arg-x"
-    // MUSTACHE: {{/in-path}}
-    // MUSTACHE: {{#in-query}}
-    query-params.add (openapi.QueryParam "x-orig-arg-x" x-op-arg-x)
-    // MUSTACHE: {{/in-query}}
-    // MUSTACHE: {{#in-header}}
-    headers.set "x-orig-arg-x" x-op-arg-x
-    // MUSTACHE: {{/in-header}}
-    // MUSTACHE: {{#in-cookie}}
-    cookie-params.add "x-orig-arg-x=$x-op-arg-x"
-    // MUSTACHE: {{/in-cookie}}
+    // MUSTACHE: {{#required}}
+    if true:
+    // MUSTACHE: {{/required}}
+    // MUSTACHE: {{^required}}
+    if x-op-arg-x != null:
+    // MUSTACHE: {{/required}}
+      // MUSTACHE: x-orig-arg-x={{{original-name}}}
+      // MUSTACHE: {{#in-path}}
+      path = path.replace --all "{$("x-orig-arg-x")}" "$x-op-arg-x"
+      // MUSTACHE: {{/in-path}}
+      // MUSTACHE: {{#in-query}}
+      query-params.add (openapi.QueryParam "x-orig-arg-x" x-op-arg-x)
+      // MUSTACHE: {{/in-query}}
+      // MUSTACHE: {{#in-header}}
+      headers.set "x-orig-arg-x" x-op-arg-x
+      // MUSTACHE: {{/in-header}}
+      // MUSTACHE: {{#in-cookie}}
+      cookie-params.add "x-orig-arg-x=$x-op-arg-x"
+      // MUSTACHE: {{/in-cookie}}
     // MUSTACHE: {{/parameters}}
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+    // MUSTACHE: {{#has-cookie-params}}
+    headers.set "Cookie" (cookie-params.join "; ")
+    // MUSTACHE: {{/has-cookie-params}}
+
+    // MUSTACHE: {{#request-body}}
+    headers.set "Content-Type" "application/json"
+    // MUSTACHE: {{/request-body}}
 
     return api-client_.invoke-api
         --path=path
@@ -94,7 +105,7 @@ class X-ApiClassName-x:
         // MUSTACHE: {{#request-body}}
         --body=body-arg
         // MUSTACHE: {{/request-body}}
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 

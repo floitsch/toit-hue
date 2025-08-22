@@ -1,9 +1,8 @@
-name: pet-store
-description: Pet-store demo.
-
 dependencies:
   http:
     url: github.com/toitlang/pkg-http
-    version: ^2.9.0
+    version: ^2.10.0
   openapi:
     path: ../openapi-pkg
+  pet-store:
+    path: ../out

@@ -35,11 +35,15 @@ class ApiClient:
       --path/string
       --method/string
       --query-params/List  // of QueryParam
-      --body/Object?=null
+      --body/io.Data?=null
       --header-params/Headers
       --form-params/Map  // of string to string
       --content-type/string?
   :
+    if content-type == "application/x-www-form-urlencoded":
+      if body: throw "body and form-params cannot be used together"
+      body = serialize-form_ form-params
+
     if authentication:
       authentication.apply-to-params
           --query-params=query-params
@@ -57,25 +61,19 @@ class ApiClient:
         ? ""
         : "?$(url-encoded-query-params.join "&")"
     uri := "$base-path$path$query-string"
+    print "URI: $uri  METHOD: $method headers: $header-params"
 
     request := client_.new-request method
         --uri=uri
         --headers=header-params
-    msg-body := null
-    if content-type == "application/x-www-form-urlencoded":
-      msg-body = serialize-form_ form-params
-    else if body:
-      msg-body = serialize_ body
-    if not msg-body.is-empty:
-      request.body = io.Reader msg-body
+    if body and body is not ByteArray:
+      body = ByteArray.from body
+    if body:
+      request.body = io.Reader (body as ByteArray)
 
     return request.send
 
-  serialize_ value/Object? -> ByteArray:
-    if not value: return #[]
-    throw "UNIMPLEMENTED"
-
-  serialize-form_ map/Map -> ByteArray:
+  static serialize-form_ map/Map -> ByteArray:
     buffer := io.Buffer
     first := true
     map.do: | key value |

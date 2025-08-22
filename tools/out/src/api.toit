@@ -56,15 +56,15 @@ class PetApi:
     cookie-params := []
 
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
+    headers.set "Content-Type" "application/json"
 
     return api-client_.invoke-api
         --path=path
-        --method="put"
+        --method="$http.PUT"
         --query-params=query-params
         --body=body-arg
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -94,15 +94,15 @@ class PetApi:
     cookie-params := []
 
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
+    headers.set "Content-Type" "application/json"
 
     return api-client_.invoke-api
         --path=path
-        --method="post"
+        --method="$http.POST"
         --query-params=query-params
         --body=body-arg
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -131,16 +131,16 @@ class PetApi:
     query-params := []
     cookie-params := []
 
-    query-params.add (openapi.QueryParam "status" status)
+    if status != null:
+      query-params.add (openapi.QueryParam "status" status)
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
 
     return api-client_.invoke-api
         --path=path
-        --method="get"
+        --method="$http.GET"
         --query-params=query-params
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -169,16 +169,16 @@ class PetApi:
     query-params := []
     cookie-params := []
 
-    query-params.add (openapi.QueryParam "tags" tags)
+    if tags != null:
+      query-params.add (openapi.QueryParam "tags" tags)
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
 
     return api-client_.invoke-api
         --path=path
-        --method="get"
+        --method="$http.GET"
         --query-params=query-params
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -207,16 +207,16 @@ class PetApi:
     query-params := []
     cookie-params := []
 
-    path = path.replace --all "{$("petId")}" "$pet-id"
+    if true:
+      path = path.replace --all "{$("petId")}" "$pet-id"
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
 
     return api-client_.invoke-api
         --path=path
-        --method="get"
+        --method="$http.GET"
         --query-params=query-params
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -247,18 +247,20 @@ class PetApi:
     query-params := []
     cookie-params := []
 
-    path = path.replace --all "{$("petId")}" "$pet-id"
-    query-params.add (openapi.QueryParam "name" name)
-    query-params.add (openapi.QueryParam "status" status)
+    if true:
+      path = path.replace --all "{$("petId")}" "$pet-id"
+    if name != null:
+      query-params.add (openapi.QueryParam "name" name)
+    if status != null:
+      query-params.add (openapi.QueryParam "status" status)
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
 
     return api-client_.invoke-api
         --path=path
-        --method="post"
+        --method="$http.POST"
         --query-params=query-params
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -294,17 +296,18 @@ class PetApi:
     query-params := []
     cookie-params := []
 
-    headers.set "api_key" api-key
-    path = path.replace --all "{$("petId")}" "$pet-id"
+    if api-key != null:
+      headers.set "api_key" api-key
+    if true:
+      path = path.replace --all "{$("petId")}" "$pet-id"
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
 
     return api-client_.invoke-api
         --path=path
-        --method="delete"
+        --method="$http.DELETE"
         --query-params=query-params
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -338,18 +341,20 @@ class PetApi:
     query-params := []
     cookie-params := []
 
-    path = path.replace --all "{$("petId")}" "$pet-id"
-    query-params.add (openapi.QueryParam "additionalMetadata" additional-metadata)
+    if true:
+      path = path.replace --all "{$("petId")}" "$pet-id"
+    if additional-metadata != null:
+      query-params.add (openapi.QueryParam "additionalMetadata" additional-metadata)
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
+    headers.set "Content-Type" "application/json"
 
     return api-client_.invoke-api
         --path=path
-        --method="post"
+        --method="$http.POST"
         --query-params=query-params
         --body=body-arg
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -394,14 +399,13 @@ class StoreApi:
     cookie-params := []
 
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
 
     return api-client_.invoke-api
         --path=path
-        --method="get"
+        --method="$http.GET"
         --query-params=query-params
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -428,15 +432,15 @@ class StoreApi:
     cookie-params := []
 
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
+    headers.set "Content-Type" "application/json"
 
     return api-client_.invoke-api
         --path=path
-        --method="post"
+        --method="$http.POST"
         --query-params=query-params
         --body=body-arg
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -465,16 +469,16 @@ class StoreApi:
     query-params := []
     cookie-params := []
 
-    path = path.replace --all "{$("orderId")}" "$order-id"
+    if true:
+      path = path.replace --all "{$("orderId")}" "$order-id"
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
 
     return api-client_.invoke-api
         --path=path
-        --method="get"
+        --method="$http.GET"
         --query-params=query-params
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -503,16 +507,16 @@ class StoreApi:
     query-params := []
     cookie-params := []
 
-    path = path.replace --all "{$("orderId")}" "$order-id"
+    if true:
+      path = path.replace --all "{$("orderId")}" "$order-id"
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
 
     return api-client_.invoke-api
         --path=path
-        --method="delete"
+        --method="$http.DELETE"
         --query-params=query-params
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -552,15 +556,15 @@ class UserApi:
     cookie-params := []
 
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
+    headers.set "Content-Type" "application/json"
 
     return api-client_.invoke-api
         --path=path
-        --method="post"
+        --method="$http.POST"
         --query-params=query-params
         --body=body-arg
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -590,15 +594,15 @@ class UserApi:
     cookie-params := []
 
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
+    headers.set "Content-Type" "application/json"
 
     return api-client_.invoke-api
         --path=path
-        --method="post"
+        --method="$http.POST"
         --query-params=query-params
         --body=body-arg
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -628,17 +632,18 @@ class UserApi:
     query-params := []
     cookie-params := []
 
-    query-params.add (openapi.QueryParam "username" username)
-    query-params.add (openapi.QueryParam "password" password)
+    if username != null:
+      query-params.add (openapi.QueryParam "username" username)
+    if password != null:
+      query-params.add (openapi.QueryParam "password" password)
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
 
     return api-client_.invoke-api
         --path=path
-        --method="get"
+        --method="$http.GET"
         --query-params=query-params
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -670,14 +675,13 @@ class UserApi:
     cookie-params := []
 
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
 
     return api-client_.invoke-api
         --path=path
-        --method="get"
+        --method="$http.GET"
         --query-params=query-params
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -703,16 +707,16 @@ class UserApi:
     query-params := []
     cookie-params := []
 
-    path = path.replace --all "{$("username")}" "$username"
+    if true:
+      path = path.replace --all "{$("username")}" "$username"
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
 
     return api-client_.invoke-api
         --path=path
-        --method="get"
+        --method="$http.GET"
         --query-params=query-params
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -742,17 +746,18 @@ class UserApi:
     query-params := []
     cookie-params := []
 
-    path = path.replace --all "{$("username")}" "$username"
+    if true:
+      path = path.replace --all "{$("username")}" "$username"
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
+    headers.set "Content-Type" "application/json"
 
     return api-client_.invoke-api
         --path=path
-        --method="put"
+        --method="$http.PUT"
         --query-params=query-params
         --body=body-arg
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 
@@ -784,16 +789,16 @@ class UserApi:
     query-params := []
     cookie-params := []
 
-    path = path.replace --all "{$("username")}" "$username"
+    if true:
+      path = path.replace --all "{$("username")}" "$username"
 
-    if not cookie-params.is-empty:
-      headers.set "Cookie" (cookie-params.join "; ")
+
 
     return api-client_.invoke-api
         --path=path
-        --method="delete"
+        --method="$http.DELETE"
         --query-params=query-params
-        --header-params=http.Headers
+        --header-params=headers
         --form-params={:}
         --content-type=null
 

@@ -1,0 +1,20 @@
+sdk: ^2.0.0-alpha.170
+prefixes:
+  http: pkg-http
+  openapi: openapi-pkg
+  pet-store: out
+packages:
+  openapi-pkg:
+    path: ../openapi-pkg
+    prefixes:
+      http: pkg-http
+  out:
+    path: ../out
+    prefixes:
+      http: pkg-http
+      openapi: openapi-pkg
+  pkg-http:
+    url: github.com/toitlang/pkg-http
+    name: http
+    version: 2.10.0
+    hash: d8ae3a9bfe56f08527b1f8b5db89c6c37aff631e

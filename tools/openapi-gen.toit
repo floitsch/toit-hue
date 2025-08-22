@@ -1,6 +1,7 @@
 import encoding.yaml
 import fs
 import host.file
+import host.directory
 import io
 import mustache
 import system
@@ -256,7 +257,9 @@ class OpenApiGenerator:
     method-namer := namer.fresh-method-namer
     // For each operation we have a '--raw' version.
     method-namer.reserve_ "raw"
+    has-cookie-params/bool := false
     parameters := (op.parameters or []).map: | param/Parameter |
+      if param.in == Parameter.COOKIE: has-cookie-params = true
       {
         "name": method-namer.reserve-parameter param,
         "description": param.description,
@@ -277,7 +280,7 @@ class OpenApiGenerator:
       }
 
     return {
-      "method": method,
+      "method": "\$http.$(method.to-ascii-upper)",
       "path": path,
       "description": op.description,
       "deprecated": op.deprecated,
@@ -285,6 +288,7 @@ class OpenApiGenerator:
       "parameters": parameters,
       "request-body": request-body,
       "tags": op.tags,
+      "has-cookie-params": has-cookie-params,
     }
 
 main args/List:
@@ -293,10 +297,10 @@ main args/List:
     return
   openapi := build (yaml.decode (file.read-content args[0]))
   context := (OpenApiGenerator --base-dir=args[1]).gen openapi
-  print context
   dir := fs.dirname system.program-path
   toit-template := (file.read-content "$dir/openapi-template/api.toit").to-string
   mustache-template := template-to-mustache toit-template
   parsed := mustache.parse mustache-template
   rendered := mustache.render parsed --input=context
-  file.write-content --path=(fs.join args[1] "api.toit") rendered
+  directory.mkdir --recursive (fs.join args[1] "src")
+  file.write-content --path=(fs.join args[1] "src" "api.toit") rendered
