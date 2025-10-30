@@ -1,8 +1,12 @@
+// Copyright (C) 2025 Toit contributors.
+// Use of this source code is governed by a Zero-Clause BSD license that can
+// be found in the tests/TESTS_LICENSE file.
+
 import encoding.json
 import host.file
 import host.directory
 
-import .json-schema as json-schema
+import json-schema
 
 import encoding.url
 
@@ -18,7 +22,7 @@ class TestLoader extends json-schema.HttpResourceLoader:
   load url/string:
     if remote-path and url.starts-with LOCALHOST-PREFIX:
       local-path := url[LOCALHOST-PREFIX.size..]
-      content := file.read-content "$remote-path/$local-path"
+      content := file.read-contents "$remote-path/$local-path"
       return json.decode content
     else:
       return super url
@@ -41,7 +45,7 @@ main args:
   print "Success: $success-counter/$total-counter"
 
 run-test-file file-path/string --resource-loader/json-schema.ResourceLoader:
-  test-json := json.decode (file.read-content file-path)
+  test-json := json.decode (file.read-contents file-path)
   already-printed := false
   run-tests test-json --resource-loader=resource-loader --print-header=:
     if not already-printed:

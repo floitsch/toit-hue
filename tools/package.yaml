@@ -11,6 +11,11 @@ dependencies:
   http:
     url: github.com/toitlang/pkg-http
     version: ^2.7.2
+  json-pointer:
+    url: github.com/toitware/toit-json-pointer
+    version: ^1.0.0
+  json-schema:
+    path: json-schema
   mustache:
     url: github.com/toitware/toit-mustache
     version: ^1.0.1

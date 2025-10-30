@@ -4,8 +4,8 @@ import encoding.json
 import net
 import uuid show Uuid
 import .uri
-import .json-pointer
-import .regex as regex
+import json-pointer show *
+import .regex_ as regex
 
 /**
 An implementation of the JSON Schema Specification Draft 2022-12.
@@ -1319,7 +1319,6 @@ abstract class Action:
   The order/precedence of the action.
 
   An action with a lower order is executed before an action with a higher order.
-  This can be used to ensure that certain actions are executed before others.
 
   Typically, actions that are fast to execute should be executed first, so that their failure
     short-circuits the validation.

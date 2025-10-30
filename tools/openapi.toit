@@ -1,8 +1,8 @@
 import uuid show Uuid
 
-import .json-schema as json-schema
-import .json-schema.json-pointer show JsonPointer
-import .json-schema.uri
+import json-schema
+import json-pointer show JsonPointer
+import json-schema.uri show UriReference
 
 /**
 A base class for OpenAPI class that can have extensions.

@@ -1,7 +1,7 @@
 import expect show *
 
 import .openapi
-import .json-schema.json-pointer show JsonPointer
+import json-pointer show JsonPointer
 
 /**
 All examples with section numbers are from https://spec.openapis.org/oas/v3.1.0.
@@ -550,7 +550,7 @@ test-operation:
   expect-equals "ID of pet that needs to be updated" parameter.description
   expect parameter.required
 
-  body/RequestBody := operation.request-body
+  body/RequestBody := operation.request-body.resolved-request-body
   expect-equals 1 body.content.size
   content/MediaType := body.content["application/x-www-form-urlencoded"]
 
