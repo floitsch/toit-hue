@@ -10,7 +10,19 @@ import .store_
 import .validation
 import .uri
 
+/**
+Actions are the building blocks of JSON Schema validation.
 
+An $Action is either an $Applicator or an $Assertion.
+An $Applicator validates a JSON value against one or more subschemas.
+  Examples of applicators are $Properties, $Items, AllOf ($X-Of), $Ref.
+An $Assertion validates a JSON value against some criteria that does not involve subschemas.
+  Examples of assertions are $Type, $Enum, $Const, $StringLength.
+*/
+
+/**
+The base class for all actions.
+*/
 abstract class Action:
   static ORDER-EARLY ::= 20
   static ORDER-DEFAULT ::= 50
@@ -29,8 +41,28 @@ abstract class Action:
   */
   abstract order -> int
 
-  abstract validate o/any --context/ValidationContext --location/InstantiatedSchema --instance-pointer/JsonPointer -> SubResult
+  /**
+  Validates the given JSON value $o against this action.
 
+  The $context provides global information about the validation process, such
+    as whether annotations are needed, or how to resolve dynamic references (the
+    $ValidationContext.store).
+
+  The $location is the instantiated schema (a schema that has been resolved
+    and has a dynamic location in the schema tree).
+
+  The $instance-pointer points to the location of $o.
+  */
+  abstract validate o/any -> SubResult
+      --context/ValidationContext
+      --location/InstantiatedSchema
+      --instance-pointer/JsonPointer
+
+/**
+The base class for all applicator actions.
+
+Applicators validate a JSON value against one or more subschemas.
+*/
 abstract class Applicator extends Action:
   order -> int:
     return Action.ORDER-DEFAULT
@@ -45,10 +77,21 @@ abstract class AnnotationsApplicator extends Applicator:
       --instance-pointer/JsonPointer
       --annotations/Map?
 
+/**
+The base class for all assertion actions.
+
+Assertions validate a JSON value against some criteria that does not involve subschemas.
+*/
 abstract class Assertion extends Action:
   order -> int:
     return Action.ORDER-EARLY
 
+/**
+A simple assertion that validates any JSON value, but where the
+  validation logic only needs access to the value itself.
+
+Examples: $Type, $Enum, $Const.
+*/
 abstract class SimpleAssertion extends Assertion:
   abstract validate o/any [fail] -> none
 
@@ -62,6 +105,12 @@ abstract class SimpleAssertion extends Assertion:
       result.fail keyword error-message
     return result
 
+/**
+A simple assertion (only needing the actual value) that only applies
+  to string values.
+
+Examples: $StringLength, $Pattern.
+*/
 abstract class SimpleStringAssertion extends Assertion:
   abstract validate str/string [fail] -> none
 
@@ -76,6 +125,12 @@ abstract class SimpleStringAssertion extends Assertion:
       result.fail keyword error-message
     return result
 
+/**
+A simple assertion (only needing the actual value) that only applies
+  to numeric values.
+
+Examples: $NumComparison (representing minimum, maximum, exclusiveMinimum, exclusiveMaximum).
+*/
 abstract class SimpleNumAssertion extends Assertion:
   abstract validate n/num [fail] -> none
 
@@ -90,6 +145,12 @@ abstract class SimpleNumAssertion extends Assertion:
       result.fail keyword error-message
     return result
 
+/**
+A simple assertion (only needing the actual value) that only applies
+  to object values (maps).
+
+Examples: $Required.
+*/
 abstract class SimpleObjectAssertion extends Assertion:
   abstract validate o/Map [fail] -> none
 
@@ -104,6 +165,12 @@ abstract class SimpleObjectAssertion extends Assertion:
       result.fail keyword error-message
     return result
 
+/**
+A simple assertion (only needing the actual value) that only applies
+  to array values (lists).
+
+Examples: $ArrayLength, $UniqueItems.
+*/
 abstract class SimpleListAssertion extends Assertion:
   abstract validate o/List [fail] -> none
 
@@ -118,6 +185,12 @@ abstract class SimpleListAssertion extends Assertion:
       result.fail keyword error-message
     return result
 
+/**
+A reference to another schema.
+
+References can be static or dynamic. In the latter case, the reference
+  is resolved at validation time based on dynamic anchors in the instance.
+*/
 class Ref extends Applicator:
   target-uri/UriReference
   resolved_/Schema? := null
@@ -167,6 +240,9 @@ class Ref extends Applicator:
 
     return location["\$ref", resolved].validate o --context=context --instance-pointer=instance-pointer
 
+/**
+An applicator representing all-of, any-of, and one-of.
+*/
 class X-Of extends Applicator:
   static ALL-OF ::= 0
   static ANY-OF ::= 1
@@ -174,7 +250,7 @@ class X-Of extends Applicator:
 
   kind/int
   subschemas/List
-  // An x-of keyword can be disabled it there is an OpenAPI discriminator. In that
+  // An x-of keyword can be disabled if there is an OpenAPI discriminator. In that
   // case the discriminator does the work of the x-of keyword.
   is-disabled/bool := false
 
@@ -285,6 +361,11 @@ class IfThenElse extends Applicator:
           return result
     return result
 
+/**
+Applicator for dependent schemas.
+
+A schema is dependent on properties of the object that is validated.
+*/
 class DependentSchemas extends Applicator:
   subschemas/Map
 
@@ -311,6 +392,9 @@ class DependentSchemas extends Applicator:
             return result
     return result
 
+/**
+An applicator for properties of an object.
+*/
 class Properties extends Applicator:
   properties/Map?
   additional/Schema?
