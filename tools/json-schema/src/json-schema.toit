@@ -79,6 +79,13 @@ build o/any --resource-loader/ResourceLoader=HttpResourceLoader -> JsonSchema:
   resolve --context=context
   return schema
 
+/**
+Parses the given object $o as a JSON schema.
+
+The result is not yet resolved. (See $resolve).
+In many cases, the function $build should be used, as it resolves once the schema
+  has been parsed.
+*/
 parse o/any -> JsonSchema
     --context/BuildContext
     --json-pointer/JsonPointer=JsonPointer
@@ -138,6 +145,9 @@ resolve --context/BuildContext:
 
 /**
 A parsed JSON Schema.
+
+Contrary to a pure $Schema, this class also has information (the $Store) to
+  resolve dynamic references.
 */
 class JsonSchema:
   schema_/Schema
@@ -145,6 +155,9 @@ class JsonSchema:
 
   constructor.private_ .schema_ .store_:
 
+  /**
+  Validates the given object $o, against this schema.
+  */
   validate o/any --collect-annotations/bool=true --collect-all-errors/bool=false -> Result:
     location := InstantiatedSchema null "" schema_
     context := ValidationContext

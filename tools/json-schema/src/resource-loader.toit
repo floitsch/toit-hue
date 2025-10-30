@@ -7,9 +7,21 @@ import http
 import encoding.json
 import net
 
+/**
+Resource loaders.
+*/
+
+/**
+An interface for the resource loading of JSON schemas.
+*/
 interface ResourceLoader:
   load url/string -> any
 
+/**
+An HTTP based resource loader.
+
+Uses HTTP 'GET' to fetch requested URLs.
+*/
 class HttpResourceLoader implements ResourceLoader:
   constructor:
     certificate-roots.install-all-trusted-roots

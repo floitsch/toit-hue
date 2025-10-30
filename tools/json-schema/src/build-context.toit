@@ -6,6 +6,16 @@ import .resource-loader
 import .store_
 import .vocabulary show JSON-SCHEMA-2020-12-URI
 
+/**
+Library containing a $BuildContext.
+*/
+
+/**
+A build context contains global information relevant for parsing and resolving.
+
+Specifically, users can provide a $ResourceLoader, and/or a URI for the default
+  vocabulary.
+*/
 class BuildContext:
   store/Store ::= Store
   refs/List := []  // Of ActionRef.
