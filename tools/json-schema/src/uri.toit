@@ -1,3 +1,7 @@
+// Copyright (C) 2025 Toit contributors.
+// Use of this source code is governed by an MIT-style license that can be
+// found in the LICENSE file.
+
 import encoding.url as encoding-url
 
 normalize-percent-encoding_ str/string -> string:

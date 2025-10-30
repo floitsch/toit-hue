@@ -7,6 +7,7 @@ import host.file
 import host.directory
 
 import json-schema
+import json-schema.resource-loader as json-schema
 
 import encoding.url
 
