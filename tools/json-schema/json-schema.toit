@@ -1,8 +1,3 @@
-/**
-An implementation of the JSON Schema Specification Draft 2022-12.
-https://json-schema.org/draft/2020-12/json-schema-core#name-the-vocabulary-keyword
-*/
-
 import certificate-roots
 import http
 import encoding.json
@@ -11,6 +6,52 @@ import uuid show Uuid
 import .uri
 import .json-pointer
 import .regex as regex
+
+/**
+An implementation of the JSON Schema Specification Draft 2022-12.
+https://json-schema.org/draft/2020-12/json-schema-core#name-the-vocabulary-keyword
+
+Start by building a $JsonSchema with $build. The returned schema can then be
+  used to validate JSON values with $JsonSchema.validate.
+
+# Example
+
+```
+import json-schema
+
+main:
+  schema := json-schema.build {
+    "\$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string"
+      },
+      "age": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "required": ["name", "age"]
+  }
+
+
+  result := schema.validate {
+    "name": "John Doe",
+    "age": 30
+  }
+  print result.is-valid  // => true.
+
+  result = schema.validate {
+    "name": "John Doe",
+    "age": -5  // Not valid, as age is less than minimum.
+  }
+  print result.is-valid  // => false.
+```
+
+Note that the $Result object contains more information than just whether
+  the validation succeeded.
+*/
 
 JSON-SCHEMA-2020-12-URI ::= "https://json-schema.org/draft/2020-12/schema"
 OPENAPI-3_1-URI ::= "https://spec.openapis.org/oas/3.1/dialect/base"
