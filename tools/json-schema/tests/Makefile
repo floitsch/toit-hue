@@ -10,9 +10,9 @@ all: test-suite
 .PHONY: test-suite
 test-suite: JSON-Schema-Test-Suite
 	$(TOIT_EXECUTABLE) test.toit \
+		--expected-failures=test-fail.json \
 		JSON-Schema-Test-Suite/remotes \
 		JSON-Schema-Test-Suite/tests/draft2020-12
-	@echo "********** Expected to see 3 tests failing"
 
 JSON-Schema-Test-Suite:
 	git clone --depth 1 https://github.com/json-schema-org/JSON-Schema-Test-Suite.git
