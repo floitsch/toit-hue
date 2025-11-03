@@ -13,7 +13,7 @@ import .validation
 import .vocabulary
 import .uri
 
-export Result Detail
+export Result Detail BuildContext OPENAPI-3-1-URI JSON-SCHEMA-2020-12-URI
 
 /**
 An implementation of the JSON Schema Specification Draft 2022-12.

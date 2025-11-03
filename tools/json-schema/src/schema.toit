@@ -23,7 +23,6 @@ class Schema:
   /**
   If this schema is in an all-of chain where the super-parent has an
     OpenAPI discriminator, then this is the discriminator of that super parent.
-
   */
   all-of-discriminator/Discriminator? := null
 
