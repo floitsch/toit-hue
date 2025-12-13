@@ -2,6 +2,7 @@ import http
 import net
 import openapi
 
+
 class Api:
   api-client_/openapi.ApiClient? := ?
 
@@ -47,15 +48,13 @@ class PetApi:
   Variant of $update-pet that takes a raw body and
     returns the raw response.
   */
-  update-pet --raw
+  update-pet --raw/True -> http.Response
       body-arg
   :
     path := "/pet"
     headers := http.Headers
     query-params := []
     cookie-params := []
-
-
 
     headers.set "Content-" "application/json"
 
@@ -85,15 +84,13 @@ class PetApi:
   Variant of $add-pet that takes a raw body and
     returns the raw response.
   */
-  add-pet --raw
+  add-pet --raw/True -> http.Response
       body-arg
   :
     path := "/pet"
     headers := http.Headers
     query-params := []
     cookie-params := []
-
-
 
     headers.set "Content-" "application/json"
 
@@ -123,7 +120,7 @@ class PetApi:
   Variant of $find-pets-by-status that takes a raw body and
     returns the raw response.
   */
-  find-pets-by-status --raw
+  find-pets-by-status --raw/True -> http.Response
       --status/string?=null
   :
     path := "/pet/findByStatus"
@@ -132,9 +129,11 @@ class PetApi:
     cookie-params := []
 
     if status != null:
-      query-params.add (openapi.QueryParam "status" status)
-
-
+      query-params.add-all (openapi.encode-query-param
+        "status"
+        status
+        --explode
+      )
 
     return api-client_.invoke-api
         --path=path
@@ -161,7 +160,7 @@ class PetApi:
   Variant of $find-pets-by-tags that takes a raw body and
     returns the raw response.
   */
-  find-pets-by-tags --raw
+  find-pets-by-tags --raw/True -> http.Response
       --tags/List?=null
   :
     path := "/pet/findByTags"
@@ -170,9 +169,11 @@ class PetApi:
     cookie-params := []
 
     if tags != null:
-      query-params.add (openapi.QueryParam "tags" tags)
-
-
+      query-params.add-all (openapi.encode-query-param
+        "tags"
+        tags
+        --explode
+      )
 
     return api-client_.invoke-api
         --path=path
@@ -199,7 +200,7 @@ class PetApi:
   Variant of $get-pet-by-id that takes a raw body and
     returns the raw response.
   */
-  get-pet-by-id --raw
+  get-pet-by-id --raw/True -> http.Response
       --pet-id/int
   :
     path := "/pet/{petId}"
@@ -209,8 +210,6 @@ class PetApi:
 
     if true:
       path = path.replace --all "{$("petId")}" "$pet-id"
-
-
 
     return api-client_.invoke-api
         --path=path
@@ -237,7 +236,7 @@ class PetApi:
   Variant of $update-pet-with-form that takes a raw body and
     returns the raw response.
   */
-  update-pet-with-form --raw
+  update-pet-with-form --raw/True -> http.Response
       --pet-id/int
       --name/string?=null
       --status/string?=null
@@ -249,12 +248,18 @@ class PetApi:
 
     if true:
       path = path.replace --all "{$("petId")}" "$pet-id"
+
     if name != null:
-      query-params.add (openapi.QueryParam "name" name)
+      query-params.add-all (openapi.encode-query-param
+        "name"
+        name
+      )
+
     if status != null:
-      query-params.add (openapi.QueryParam "status" status)
-
-
+      query-params.add-all (openapi.encode-query-param
+        "status"
+        status
+      )
 
     return api-client_.invoke-api
         --path=path
@@ -287,7 +292,7 @@ class PetApi:
   Variant of $delete-pet that takes a raw body and
     returns the raw response.
   */
-  delete-pet --raw
+  delete-pet --raw/True -> http.Response
       --api-key/string?=null
       --pet-id/int
   :
@@ -297,11 +302,10 @@ class PetApi:
     cookie-params := []
 
     if api-key != null:
-      headers.set "api_key" api-key
+      openapi.encode-header-param headers "api_key" api-key
+
     if true:
       path = path.replace --all "{$("petId")}" "$pet-id"
-
-
 
     return api-client_.invoke-api
         --path=path
@@ -331,7 +335,7 @@ class PetApi:
   Variant of $upload-file that takes a raw body and
     returns the raw response.
   */
-  upload-file --raw
+  upload-file --raw/True -> http.Response
       --pet-id/int
       --additional-metadata/string?=null
       body-arg
@@ -343,9 +347,12 @@ class PetApi:
 
     if true:
       path = path.replace --all "{$("petId")}" "$pet-id"
-    if additional-metadata != null:
-      query-params.add (openapi.QueryParam "additionalMetadata" additional-metadata)
 
+    if additional-metadata != null:
+      query-params.add-all (openapi.encode-query-param
+        "additionalMetadata"
+        additional-metadata
+      )
 
     headers.set "Content-" "application/json"
 
@@ -391,15 +398,12 @@ class StoreApi:
   Variant of $get-inventory that takes a raw body and
     returns the raw response.
   */
-  get-inventory --raw
+  get-inventory --raw/True -> http.Response
   :
     path := "/store/inventory"
     headers := http.Headers
     query-params := []
     cookie-params := []
-
-
-
 
     return api-client_.invoke-api
         --path=path
@@ -423,15 +427,13 @@ class StoreApi:
   Variant of $place-order that takes a raw body and
     returns the raw response.
   */
-  place-order --raw
+  place-order --raw/True -> http.Response
       body-arg
   :
     path := "/store/order"
     headers := http.Headers
     query-params := []
     cookie-params := []
-
-
 
     headers.set "Content-" "application/json"
 
@@ -461,7 +463,7 @@ class StoreApi:
   Variant of $get-order-by-id that takes a raw body and
     returns the raw response.
   */
-  get-order-by-id --raw
+  get-order-by-id --raw/True -> http.Response
       --order-id/int
   :
     path := "/store/order/{orderId}"
@@ -471,8 +473,6 @@ class StoreApi:
 
     if true:
       path = path.replace --all "{$("orderId")}" "$order-id"
-
-
 
     return api-client_.invoke-api
         --path=path
@@ -499,7 +499,7 @@ class StoreApi:
   Variant of $delete-order that takes a raw body and
     returns the raw response.
   */
-  delete-order --raw
+  delete-order --raw/True -> http.Response
       --order-id/int
   :
     path := "/store/order/{orderId}"
@@ -509,8 +509,6 @@ class StoreApi:
 
     if true:
       path = path.replace --all "{$("orderId")}" "$order-id"
-
-
 
     return api-client_.invoke-api
         --path=path
@@ -547,15 +545,13 @@ class UserApi:
   Variant of $create-user that takes a raw body and
     returns the raw response.
   */
-  create-user --raw
+  create-user --raw/True -> http.Response
       body-arg
   :
     path := "/user"
     headers := http.Headers
     query-params := []
     cookie-params := []
-
-
 
     headers.set "Content-" "application/json"
 
@@ -585,15 +581,13 @@ class UserApi:
   Variant of $create-users-with-list-input that takes a raw body and
     returns the raw response.
   */
-  create-users-with-list-input --raw
+  create-users-with-list-input --raw/True -> http.Response
       body-arg
   :
     path := "/user/createWithList"
     headers := http.Headers
     query-params := []
     cookie-params := []
-
-
 
     headers.set "Content-" "application/json"
 
@@ -623,7 +617,7 @@ class UserApi:
   Variant of $login-user that takes a raw body and
     returns the raw response.
   */
-  login-user --raw
+  login-user --raw/True -> http.Response
       --username/string?=null
       --password/string?=null
   :
@@ -633,11 +627,16 @@ class UserApi:
     cookie-params := []
 
     if username != null:
-      query-params.add (openapi.QueryParam "username" username)
+      query-params.add-all (openapi.encode-query-param
+        "username"
+        username
+      )
+
     if password != null:
-      query-params.add (openapi.QueryParam "password" password)
-
-
+      query-params.add-all (openapi.encode-query-param
+        "password"
+        password
+      )
 
     return api-client_.invoke-api
         --path=path
@@ -667,15 +666,12 @@ class UserApi:
   Variant of $logout-user that takes a raw body and
     returns the raw response.
   */
-  logout-user --raw
+  logout-user --raw/True -> http.Response
   :
     path := "/user/logout"
     headers := http.Headers
     query-params := []
     cookie-params := []
-
-
-
 
     return api-client_.invoke-api
         --path=path
@@ -699,7 +695,7 @@ class UserApi:
   Variant of $get-user-by-name that takes a raw body and
     returns the raw response.
   */
-  get-user-by-name --raw
+  get-user-by-name --raw/True -> http.Response
       --username/string
   :
     path := "/user/{username}"
@@ -709,8 +705,6 @@ class UserApi:
 
     if true:
       path = path.replace --all "{$("username")}" "$username"
-
-
 
     return api-client_.invoke-api
         --path=path
@@ -737,7 +731,7 @@ class UserApi:
   Variant of $update-user that takes a raw body and
     returns the raw response.
   */
-  update-user --raw
+  update-user --raw/True -> http.Response
       --username/string
       body-arg
   :
@@ -748,7 +742,6 @@ class UserApi:
 
     if true:
       path = path.replace --all "{$("username")}" "$username"
-
 
     headers.set "Content-" "application/json"
 
@@ -781,7 +774,7 @@ class UserApi:
   Variant of $delete-user that takes a raw body and
     returns the raw response.
   */
-  delete-user --raw
+  delete-user --raw/True -> http.Response
       --username/string
   :
     path := "/user/{username}"
@@ -791,8 +784,6 @@ class UserApi:
 
     if true:
       path = path.replace --all "{$("username")}" "$username"
-
-
 
     return api-client_.invoke-api
         --path=path

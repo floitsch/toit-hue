@@ -50,7 +50,7 @@ class X-ApiClassName-x:
   Variant of $x-op-name-x that takes a raw body and
     returns the raw response.
   */
-  x-op-name-x --raw
+  x-op-name-x --raw/True -> http.Response
   // MUSTACHE: {{#parameters}} Enter parameters
   // MUSTACHE: {{#required}}
   // MUSTACHE: x-op-arg-x={{name}}
@@ -88,7 +88,7 @@ class X-ApiClassName-x:
       query-params.add-all (openapi.encode-query-param
         "x-orig-arg-x"
         x-op-arg-x
-        // MUSTACHE: {{# xstyle}}
+        // MUSTACHE: {{#style}}
         // MUSTACHE: x-style-x={{style}}
         --style="x-style-x"
         // MUSTACHE: {{/style}}
@@ -103,16 +103,16 @@ class X-ApiClassName-x:
       // MUSTACHE: {{#in-cookie}}
       cookie-params.add "x-orig-arg-x=$x-op-arg-x"
       // MUSTACHE: {{/in-cookie}}
-    // MUSTACHE: {{/parameters}}
 
+    // MUSTACHE: {{/parameters}}
     // MUSTACHE: {{#has-cookie-params}}
     headers.set "Cookie" (cookie-params.join "; ")
-    // MUSTACHE: {{/has-cookie-params}}
 
+    // MUSTACHE: {{/has-cookie-params}}
     // MUSTACHE: {{#request-body}}
     headers.set "Content-Type" "application/json"
-    // MUSTACHE: {{/request-body}}
 
+    // MUSTACHE: {{/request-body}}
     return api-client_.invoke-api
         --path=path
         --method="x-api-method-x"
