@@ -1,7 +1,7 @@
 import http
 import encoding.base64
 
-import .query-params
+import .params
 
 interface Authentication:
   /**

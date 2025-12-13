@@ -5,7 +5,7 @@ import http show Headers
 import encoding.url as url-encoding
 
 import .auth
-import .query-params
+import .params
 
 export Headers
 
