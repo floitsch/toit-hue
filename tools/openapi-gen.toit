@@ -10,7 +10,6 @@ import mustache
 import system
 
 import .openapi
-import .openapi-gen.template-to-mustache show template-to-mustache
 
 COMMON-ABBREVIATIONS := {
   "XML",
@@ -353,7 +352,7 @@ main args/List:
   context := open-api-gen.gen openapi
   dir := fs.dirname system.program-path
   toit-template := (file.read-content "$dir/openapi-template/api.toit").to-string
-  mustache-template := template-to-mustache toit-template
+  mustache-template := mustache.comment-template-to-mustache toit-template
   parsed := mustache.parse mustache-template
   rendered := mustache.render parsed --input=context
   directory.mkdir --recursive (fs.join args[1] "src")
