@@ -58,6 +58,36 @@ abstract class Action:
       --location/InstantiatedSchema
       --instance-pointer/JsonPointer
 
+  abstract accept visitor/ActionVisitor -> any
+
+interface ActionVisitor:
+  visit-Ref ref/Ref -> any
+  visit-X-Of x-of/X-Of -> any
+  visit-Not not_/Not -> any
+  visit-IfThenElse if-then-else/IfThenElse -> any
+  visit-DependentSchemas dependent-schemas/DependentSchemas -> any
+  visit-Properties properties/Properties -> any
+  visit-PropertyNames property-names/PropertyNames -> any
+  visit-Contains contains/Contains -> any
+  visit-Type type/Type -> any
+  visit-Enum enum_/Enum -> any
+  visit-Const const/Const -> any
+  visit-NumComparison num-comparison/NumComparison -> any
+  visit-StringLength string-length/StringLength -> any
+  visit-ArrayLength array-length/ArrayLength -> any
+  visit-UniqueItems unique-items/UniqueItems -> any
+  visit-Required required/Required -> any
+  visit-ObjectSize object-size/ObjectSize -> any
+  visit-Items items/Items -> any
+  visit-Pattern pattern/Pattern -> any
+  visit-DependentRequired dependent-required/DependentRequired -> any
+  visit-UnevaluatedProperties unevaluated-properties/UnevaluatedProperties -> any
+  visit-UnevaluatedItems unevaluated-items/UnevaluatedItems -> any
+  visit-Annotation annotation/Annotation -> any
+  visit-Format format/Format -> any
+  visit-Discriminator discriminator/Discriminator -> any
+
+
 /**
 The base class for all applicator actions.
 
@@ -240,6 +270,12 @@ class Ref extends Applicator:
 
     return location["\$ref", resolved].validate o --context=context --instance-pointer=instance-pointer
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-Ref this
+
+  stringify -> string:
+    return "Ref: $target-uri"
+
 /**
 An applicator representing all-of, any-of, and one-of.
 */
@@ -304,6 +340,17 @@ class X-Of extends Applicator:
         unreachable
       return result
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-X-Of this
+
+  stringify -> string:
+    if kind == X-Of.ALL-OF:
+      return "AllOf: $subschemas"
+    else if kind == X-Of.ANY-OF:
+      return "AnyOf: $subschemas"
+    else:
+      return "OneOf: $subschemas"
+
 class Not extends Applicator:
   subschema/Schema
 
@@ -321,6 +368,12 @@ class Not extends Applicator:
     if subresult.is-valid:
       result.fail "not" "Expected subschema to fail."
     return result
+
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-Not this
+
+  stringify -> string:
+    return "Not $subschema"
 
 class IfThenElse extends Applicator:
   condition-subschema/Schema
@@ -361,6 +414,13 @@ class IfThenElse extends Applicator:
           return result
     return result
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-IfThenElse this
+
+  stringify -> string:
+    return "if ($condition-subschema) then $(then-subschema) else $(else-subschema)"
+
+
 /**
 Applicator for dependent schemas.
 
@@ -391,6 +451,12 @@ class DependentSchemas extends Applicator:
           if not context.needs-all-errors:
             return result
     return result
+
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-DependentSchemas this
+
+  stringify -> string:
+    return "DependentSchemas: $subschemas"
 
 /**
 An applicator for properties of an object.
@@ -509,6 +575,15 @@ class Properties extends Applicator:
       result.fail "additionalProperties" failed-additional
     return result
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-Properties this
+
+  stringify -> string:
+    return "Properties: $properties, Additional: $additional, Patterns: $patterns"
+
+/**
+Checks the names of properties in an object.
+*/
 class PropertyNames extends Applicator:
   subschema/Schema
 
@@ -534,6 +609,15 @@ class PropertyNames extends Applicator:
       result.merge subresult
     return result
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-PropertyNames this
+
+  stringify -> string:
+    return "PropertyNames: $subschema"
+
+/**
+Check that an array contains items matching a subschema.
+*/
 class Contains extends Applicator:
   subschema/Schema
   min-contains/int?
@@ -576,6 +660,12 @@ class Contains extends Applicator:
       result.annotate "contains" annotation-value
     return result
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-Contains this
+
+  stringify -> string:
+    return "Contains: $subschema, min: $min-contains, max: $max-contains"
+
 class Type extends SimpleAssertion:
   types/List
 
@@ -594,6 +684,12 @@ class Type extends SimpleAssertion:
         // TODO(florian): This is not correct: to-int could throw.
         if o is float and (o as float).to-int == o: return
     fail.call "type" "Value type not one of $types"
+
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-Type this
+
+  stringify -> string:
+    return "Type: $types"
 
 structural-equals_ a/any b/any -> bool:
   if a is num and a == b: return true
@@ -632,6 +728,12 @@ class Enum extends SimpleAssertion:
       if structural-equals_ o value: return
     fail.call "enum" "Value not one of $values"
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-Enum this
+
+  stringify -> string:
+    return "Enum: $values"
+
 class Const extends SimpleAssertion:
   value/any
 
@@ -640,6 +742,12 @@ class Const extends SimpleAssertion:
   validate o/any [fail] -> none:
     if not structural-equals_ o value:
       fail.call "const" "Value not equal to $value"
+
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-Const this
+
+  stringify -> string:
+    return "Const: $value"
 
 class NumComparison extends SimpleNumAssertion:
   static MULTIPLE-OF ::= 0
@@ -670,6 +778,25 @@ class NumComparison extends SimpleNumAssertion:
       if o <= n:
         fail.call "exclusiveMinimum" "Value $o less than or equal to $n"
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-NumComparison this
+
+  stringify -> string:
+    kind-str/string := ?
+    if kind == MULTIPLE-OF:
+      kind-str = "multipleOf"
+    else if kind == MAXIMUM:
+      kind-str = "maximum"
+    else if kind == EXCLUSIVE-MAXIMUM:
+      kind-str = "exclusiveMaximum"
+    else if kind == MINIMUM:
+      kind-str = "minimum"
+    else if kind == EXCLUSIVE-MINIMUM:
+      kind-str = "exclusiveMinimum"
+    else:
+      unreachable
+    return "NumComparison: $kind-str, $n"
+
 class StringLength extends SimpleStringAssertion:
   min/int?
   max/int?
@@ -683,6 +810,12 @@ class StringLength extends SimpleStringAssertion:
     if max and rune-size > max:
       fail.call "maxLength" "String length $rune-size greater than $max"
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-StringLength this
+
+  stringify -> string:
+    return "StringLength: min=$min, max=$max"
+
 class ArrayLength extends SimpleListAssertion:
   min/int?
   max/int?
@@ -695,6 +828,12 @@ class ArrayLength extends SimpleListAssertion:
     if max and o.size > max:
       fail.call "maxItems" "Array length $o.size greater than $max"
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-ArrayLength this
+
+  stringify -> string:
+    return "ArrayLength: min=$min, max=$max"
+
 class UniqueItems extends SimpleListAssertion:
   constructor:
 
@@ -705,6 +844,12 @@ class UniqueItems extends SimpleListAssertion:
         if structural-equals_ list[i] list[j]:
           fail.call "uniqueItems" "Array contains duplicate items."
           return
+
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-UniqueItems this
+
+  stringify -> string:
+    return "UniqueItems"
 
 class Required extends SimpleObjectAssertion:
   properties/List
@@ -721,6 +866,12 @@ class Required extends SimpleObjectAssertion:
     else if missing.size > 1:
       fail.call "required" "Required properties $((missing.map: "'$it'").join ", ") missing."
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-Required this
+
+  stringify -> string:
+    return "Required: $properties"
+
 class ObjectSize extends SimpleObjectAssertion:
   min/int?
   max/int?
@@ -733,6 +884,15 @@ class ObjectSize extends SimpleObjectAssertion:
     if max and map.size > max:
       fail.call "maxProperties" "Object size $map.size greater than $max"
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-ObjectSize this
+
+  stringify -> string:
+    return "ObjectSize: min=$min, max=$max"
+
+/**
+Checks that the items of a list satisfy the $items schema.
+*/
 class Items extends Applicator:
   prefix-items/List?
   items/Schema?
@@ -792,6 +952,12 @@ class Items extends Applicator:
         result.annotate "items" true
     return result
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-Items this
+
+  stringify -> string:
+    return "Items: prefixItems=$prefix-items, items=$items"
+
 class Pattern extends SimpleStringAssertion:
   pattern/string
   regex_/regex.Regex
@@ -803,6 +969,18 @@ class Pattern extends SimpleStringAssertion:
     if not regex_.match str:
       fail.call "pattern" "String '$str' does not match pattern '$pattern'"
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-Pattern this
+
+  stringify -> string:
+    return "Pattern: $pattern"
+
+/**
+An assertion for dependent required properties.
+
+For each key in $properties, if that key is present in the object,
+  then all properties in the associated list must also be present.
+*/
 class DependentRequired extends SimpleObjectAssertion:
   properties/Map
 
@@ -821,6 +999,19 @@ class DependentRequired extends SimpleObjectAssertion:
     else if missing.size > 1:
       fail.call "dependentRequired" "Required properties $((missing.map: "'$it'").join ", ") missing."
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-DependentRequired this
+
+  stringify -> string:
+    return "DependentRequired: $properties"
+
+/**
+An applicator for unevaluated properties of an object.
+
+Checks that all properties that have not been evaluated by other
+  keywords (properties, patternProperties, additionalProperties,
+  unevaluatedProperties) satisfy the given subschema.
+*/
 class UnevaluatedProperties extends AnnotationsApplicator:
   static EVALUATED-ANNOTATION-KEYS_ ::= [
     "properties",
@@ -887,6 +1078,18 @@ class UnevaluatedProperties extends AnnotationsApplicator:
       result.fail "unevaluatedProperties" failed-unevaluated
     return result
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-UnevaluatedProperties this
+
+  stringify -> string:
+    return "UnevaluatedProperties: $subschema"
+
+/**
+An applicator for unevaluated items of an array.
+
+Checks that all items that have not been evaluated by other
+  keywords (items, prefixItems, contains, unevaluatedItems) satisfy the given subschema.
+*/
 class UnevaluatedItems extends AnnotationsApplicator:
   subschema/Schema
 
@@ -969,6 +1172,16 @@ class UnevaluatedItems extends AnnotationsApplicator:
       result.annotate "unevaluatedItems" true
     return result
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-UnevaluatedItems this
+
+  stringify -> string:
+    return "UnevaluatedItems: $subschema"
+
+/**
+An annotation that adds information to the validation result
+  without causing validation to fail.
+*/
 class Annotation extends Assertion:
   keyword/string
   value/any
@@ -985,6 +1198,17 @@ class Annotation extends Assertion:
       result_.annotate keyword value
     return result_
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-Annotation this
+
+  stringify -> string:
+    return "Annotation: $keyword = $value"
+
+/**
+An assertion for the format of a string.
+
+For example, "email", "uri", "date-time", etc.
+*/
 class Format extends Assertion:
   format/string
 
@@ -1001,6 +1225,20 @@ class Format extends Assertion:
     // TODO(florian): Implement validation and give a way for users to add their own formats.
     return result
 
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-Format this
+
+  stringify -> string:
+    return "Format: $format"
+
+/**
+An applicator for OpenAPI discriminators.
+
+The discriminator property is used to aid in the validation of
+  polymorphic types. It contains a mapping from discriminator values
+  to schema references. During validation, the value of the discriminator
+  property is used to select the appropriate schema for validation.
+*/
 class Discriminator extends Applicator:
   property/string
   mapping/Map?  // From string to UriReference.
@@ -1055,3 +1293,9 @@ class Discriminator extends Applicator:
       result.fail "discrimator" "Discriminator with 'oneOf' kind failed."
       return result
     return result
+
+  accept visitor/ActionVisitor -> any:
+    return visitor.visit-Discriminator this
+
+  stringify -> string:
+    return "Discriminator: property=$property, mapping=$mapping"

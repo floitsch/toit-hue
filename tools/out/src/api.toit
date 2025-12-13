@@ -57,7 +57,7 @@ class PetApi:
 
 
 
-    headers.set "Content-Type" "application/json"
+    headers.set "Content-" "application/json"
 
     return api-client_.invoke-api
         --path=path
@@ -95,7 +95,7 @@ class PetApi:
 
 
 
-    headers.set "Content-Type" "application/json"
+    headers.set "Content-" "application/json"
 
     return api-client_.invoke-api
         --path=path
@@ -124,7 +124,7 @@ class PetApi:
     returns the raw response.
   */
   find-pets-by-status --raw
-      --status=null
+      --status/string?=null
   :
     path := "/pet/findByStatus"
     headers := http.Headers
@@ -162,7 +162,7 @@ class PetApi:
     returns the raw response.
   */
   find-pets-by-tags --raw
-      --tags=null
+      --tags/List?=null
   :
     path := "/pet/findByTags"
     headers := http.Headers
@@ -200,7 +200,7 @@ class PetApi:
     returns the raw response.
   */
   get-pet-by-id --raw
-      --pet-id
+      --pet-id/int
   :
     path := "/pet/{petId}"
     headers := http.Headers
@@ -238,9 +238,9 @@ class PetApi:
     returns the raw response.
   */
   update-pet-with-form --raw
-      --pet-id
-      --name=null
-      --status=null
+      --pet-id/int
+      --name/string?=null
+      --status/string?=null
   :
     path := "/pet/{petId}"
     headers := http.Headers
@@ -288,8 +288,8 @@ class PetApi:
     returns the raw response.
   */
   delete-pet --raw
-      --api-key=null
-      --pet-id
+      --api-key/string?=null
+      --pet-id/int
   :
     path := "/pet/{petId}"
     headers := http.Headers
@@ -332,8 +332,8 @@ class PetApi:
     returns the raw response.
   */
   upload-file --raw
-      --pet-id
-      --additional-metadata=null
+      --pet-id/int
+      --additional-metadata/string?=null
       body-arg
   :
     path := "/pet/{petId}/uploadImage"
@@ -347,7 +347,7 @@ class PetApi:
       query-params.add (openapi.QueryParam "additionalMetadata" additional-metadata)
 
 
-    headers.set "Content-Type" "application/json"
+    headers.set "Content-" "application/json"
 
     return api-client_.invoke-api
         --path=path
@@ -433,7 +433,7 @@ class StoreApi:
 
 
 
-    headers.set "Content-Type" "application/json"
+    headers.set "Content-" "application/json"
 
     return api-client_.invoke-api
         --path=path
@@ -462,7 +462,7 @@ class StoreApi:
     returns the raw response.
   */
   get-order-by-id --raw
-      --order-id
+      --order-id/int
   :
     path := "/store/order/{orderId}"
     headers := http.Headers
@@ -500,7 +500,7 @@ class StoreApi:
     returns the raw response.
   */
   delete-order --raw
-      --order-id
+      --order-id/int
   :
     path := "/store/order/{orderId}"
     headers := http.Headers
@@ -557,7 +557,7 @@ class UserApi:
 
 
 
-    headers.set "Content-Type" "application/json"
+    headers.set "Content-" "application/json"
 
     return api-client_.invoke-api
         --path=path
@@ -595,7 +595,7 @@ class UserApi:
 
 
 
-    headers.set "Content-Type" "application/json"
+    headers.set "Content-" "application/json"
 
     return api-client_.invoke-api
         --path=path
@@ -624,8 +624,8 @@ class UserApi:
     returns the raw response.
   */
   login-user --raw
-      --username=null
-      --password=null
+      --username/string?=null
+      --password/string?=null
   :
     path := "/user/login"
     headers := http.Headers
@@ -700,7 +700,7 @@ class UserApi:
     returns the raw response.
   */
   get-user-by-name --raw
-      --username
+      --username/string
   :
     path := "/user/{username}"
     headers := http.Headers
@@ -738,7 +738,7 @@ class UserApi:
     returns the raw response.
   */
   update-user --raw
-      --username
+      --username/string
       body-arg
   :
     path := "/user/{username}"
@@ -750,7 +750,7 @@ class UserApi:
       path = path.replace --all "{$("username")}" "$username"
 
 
-    headers.set "Content-Type" "application/json"
+    headers.set "Content-" "application/json"
 
     return api-client_.invoke-api
         --path=path
@@ -782,7 +782,7 @@ class UserApi:
     returns the raw response.
   */
   delete-user --raw
-      --username
+      --username/string
   :
     path := "/user/{username}"
     headers := http.Headers

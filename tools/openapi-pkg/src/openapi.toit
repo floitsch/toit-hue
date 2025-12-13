@@ -1,5 +1,6 @@
 import .auth
 import .client
-import .query-params show QueryParam
+import .openapi-object
+import .params show encode-query-param QueryParam
 
 export *

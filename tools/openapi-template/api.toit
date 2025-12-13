@@ -2,6 +2,10 @@ import http
 import net
 import openapi
 
+// MUSTACHE: {{#NOT_EXIST}}
+interface Type:
+// MUSTACHE: {{/NOT_EXIST}}
+
 // MUSTACHE: X-ServiceName-x={{api-name}} provided by the user not the document.
 class X-ServiceName-x:
   api-client_/openapi.ApiClient? := ?
@@ -50,11 +54,12 @@ class X-ApiClassName-x:
   // MUSTACHE: {{#parameters}} Enter parameters
   // MUSTACHE: {{#required}}
   // MUSTACHE: x-op-arg-x={{name}}
-      --x-op-arg-x
+  // MUSTACHE: Type={{type}}
+      --x-op-arg-x/Type
   // MUSTACHE: {{/required}}
   // MUSTACHE: {{^required}}
   // MUSTACHE: x-op-other-arg-x={{name}}
-      --x-op-other-arg-x=null
+      --x-op-other-arg-x/Type?=null
   // MUSTACHE: {{/required}}
   // MUSTACHE: {{/parameters}} Leave parameters
   // MUSTACHE: {{#request-body}}
@@ -80,10 +85,20 @@ class X-ApiClassName-x:
       path = path.replace --all "{$("x-orig-arg-x")}" "$x-op-arg-x"
       // MUSTACHE: {{/in-path}}
       // MUSTACHE: {{#in-query}}
-      query-params.add (openapi.QueryParam "x-orig-arg-x" x-op-arg-x)
+      query-params.add-all (openapi.encode-query-param
+        "x-orig-arg-x"
+        x-op-arg-x
+        // MUSTACHE: {{# xstyle}}
+        // MUSTACHE: x-style-x={{style}}
+        --style="x-style-x"
+        // MUSTACHE: {{/style}}
+        // MUSTACHE: {{#explode}}
+        --explode
+        // MUSTACHE: {{/explode}}
+      )
       // MUSTACHE: {{/in-query}}
       // MUSTACHE: {{#in-header}}
-      headers.set "x-orig-arg-x" x-op-arg-x
+      openapi.encode-header-param headers "x-orig-arg-x" x-op-arg-x
       // MUSTACHE: {{/in-header}}
       // MUSTACHE: {{#in-cookie}}
       cookie-params.add "x-orig-arg-x=$x-op-arg-x"

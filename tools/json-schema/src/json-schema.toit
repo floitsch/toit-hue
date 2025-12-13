@@ -6,6 +6,7 @@ import json-pointer show *
 
 import .action show Ref
 import .build-context
+import .gen
 import .resource-loader
 import .schema
 import .store_
@@ -150,16 +151,16 @@ Contrary to a pure $Schema, this class also has information (the $Store) to
   resolve dynamic references.
 */
 class JsonSchema:
-  schema_/Schema
+  schema/Schema
   store_/Store
 
-  constructor.private_ .schema_ .store_:
+  constructor.private_ .schema .store_:
 
   /**
   Validates the given object $o, against this schema.
   */
   validate o/any --collect-annotations/bool=true --collect-all-errors/bool=false -> Result:
-    location := InstantiatedSchema null "" schema_
+    location := InstantiatedSchema null "" schema
     context := ValidationContext
         --store=store_
         --needs-all-errors=collect-all-errors

@@ -88,6 +88,28 @@ class Schema:
     reference := (UriReference.parse ref).normalize
     return reference.resolve --base=schema-resource.uri
 
+  is-reference-only -> bool:
+    if actions.size != 1: return false
+    only-action := actions[0]
+    return only-action is Ref
+
+  reference-target -> Schema?:
+    if not is-reference-only: return null
+    ref-action := actions[0] as Ref
+    return ref-action.target
+
+  reference-target-uri -> UriReference?:
+    if not is-reference-only: return null
+    ref-action := actions[0] as Ref
+    return ref-action.target-uri
+
+  hash-code -> int:
+    return absolute-location.hash-code
+
+  operator == other/any -> bool:
+    if other is not Schema: return false
+    return absolute-location == (other as Schema).absolute-location
+
 class ValidationContext:
   store/Store
   needs-annotations/bool
