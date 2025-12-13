@@ -195,6 +195,7 @@ class MethodNamer extends Namer:
     return reserve_ param.name
 
 class JsonSchemaGenerator:
+  namer/Namer := Namer
   referenced-schemas/Map ::= {:}
 
   use open-api-schema/Schema? --hint/string -> string:
@@ -210,7 +211,11 @@ class JsonSchemaGenerator:
     name := hint
     if json-schema.is-reference-only:
       target-uri := json-schema.reference-target-uri
-      name = target-uri.to-string
+      // TODO(florian): avoid name clashes.
+      print target-uri.fragment
+      json-schema-name := (target-uri.fragment.split "%2F").last
+      name = namer.toit-class-name_ json-schema-name
+      print "ref-only: $name"
 
     referenced-schemas[json-schema] = name
     return name
@@ -324,10 +329,17 @@ class OpenApiGenerator:
     request-body/Map? := null
     if op.request-body:
       resolved := op.request-body.resolved-request-body
-      // TODO(florian): get type from content.
+      content := resolved.content
+      type := ?
+      if content.contains "application/json":
+        type = json-schema-gen.use content["application/json"].schema
+          --hint="$current-path-$(current-method)-request-body"
+      else:
+        type = "ByteArray"
       request-body = {
         "description": resolved.description,
         "name": method-namer.reserve_ "body",
+        "type": type,
       }
 
     return {

@@ -49,14 +49,14 @@ class PetApi:
     returns the raw response.
   */
   update-pet --raw/True -> http.Response
-      body-arg
+      body-arg/Pet
   :
     path := "/pet"
     headers := http.Headers
     query-params := []
     cookie-params := []
 
-    headers.set "Content-" "application/json"
+    headers.set "Content-Pet" "application/json"
 
     return api-client_.invoke-api
         --path=path
@@ -72,7 +72,7 @@ class PetApi:
   - $body-arg: Update an existent pet in the store
   */
   update-pet
-      body-arg
+      body-arg/Pet
   :
     // TODO.
     raw := update-pet --raw
@@ -85,14 +85,14 @@ class PetApi:
     returns the raw response.
   */
   add-pet --raw/True -> http.Response
-      body-arg
+      body-arg/Pet
   :
     path := "/pet"
     headers := http.Headers
     query-params := []
     cookie-params := []
 
-    headers.set "Content-" "application/json"
+    headers.set "Content-Pet" "application/json"
 
     return api-client_.invoke-api
         --path=path
@@ -108,7 +108,7 @@ class PetApi:
   - $body-arg: Create a new pet in the store
   */
   add-pet
-      body-arg
+      body-arg/Pet
   :
     // TODO.
     raw := add-pet --raw
@@ -148,7 +148,7 @@ class PetApi:
   - $status: Status values that need to be considered for filter
   */
   find-pets-by-status
-      --status=null
+      --status/string=null
   :
     // TODO.
     raw := find-pets-by-status --raw
@@ -188,7 +188,7 @@ class PetApi:
   - $tags: Tags to filter by
   */
   find-pets-by-tags
-      --tags=null
+      --tags/List=null
   :
     // TODO.
     raw := find-pets-by-tags --raw
@@ -224,7 +224,7 @@ class PetApi:
   - $pet-id: ID of pet to return
   */
   get-pet-by-id
-      --pet-id
+      --pet-id/int
   :
     // TODO.
     raw := get-pet-by-id --raw
@@ -276,9 +276,9 @@ class PetApi:
   - $status: Status of pet that needs to be updated
   */
   update-pet-with-form
-      --pet-id
-      --name=null
-      --status=null
+      --pet-id/int
+      --name/string=null
+      --status/string=null
   :
     // TODO.
     raw := update-pet-with-form --raw
@@ -321,8 +321,8 @@ class PetApi:
   - $pet-id: Pet id to delete
   */
   delete-pet
-      --api-key=null
-      --pet-id
+      --api-key/string=null
+      --pet-id/int
   :
     // TODO.
     raw := delete-pet --raw
@@ -338,7 +338,7 @@ class PetApi:
   upload-file --raw/True -> http.Response
       --pet-id/int
       --additional-metadata/string?=null
-      body-arg
+      body-arg/ByteArray
   :
     path := "/pet/{petId}/uploadImage"
     headers := http.Headers
@@ -354,7 +354,7 @@ class PetApi:
         additional-metadata
       )
 
-    headers.set "Content-" "application/json"
+    headers.set "Content-ByteArray" "application/json"
 
     return api-client_.invoke-api
         --path=path
@@ -372,9 +372,9 @@ class PetApi:
   - $body-arg: 
   */
   upload-file
-      --pet-id
-      --additional-metadata=null
-      body-arg
+      --pet-id/int
+      --additional-metadata/string=null
+      body-arg/ByteArray
   :
     // TODO.
     raw := upload-file --raw
@@ -428,14 +428,14 @@ class StoreApi:
     returns the raw response.
   */
   place-order --raw/True -> http.Response
-      body-arg
+      body-arg/Order
   :
     path := "/store/order"
     headers := http.Headers
     query-params := []
     cookie-params := []
 
-    headers.set "Content-" "application/json"
+    headers.set "Content-Order" "application/json"
 
     return api-client_.invoke-api
         --path=path
@@ -451,7 +451,7 @@ class StoreApi:
   - $body-arg: 
   */
   place-order
-      body-arg
+      body-arg/Order
   :
     // TODO.
     raw := place-order --raw
@@ -487,7 +487,7 @@ class StoreApi:
   - $order-id: ID of order that needs to be fetched
   */
   get-order-by-id
-      --order-id
+      --order-id/int
   :
     // TODO.
     raw := get-order-by-id --raw
@@ -523,7 +523,7 @@ class StoreApi:
   - $order-id: ID of the order that needs to be deleted
   */
   delete-order
-      --order-id
+      --order-id/int
   :
     // TODO.
     raw := delete-order --raw
@@ -546,14 +546,14 @@ class UserApi:
     returns the raw response.
   */
   create-user --raw/True -> http.Response
-      body-arg
+      body-arg/User
   :
     path := "/user"
     headers := http.Headers
     query-params := []
     cookie-params := []
 
-    headers.set "Content-" "application/json"
+    headers.set "Content-User" "application/json"
 
     return api-client_.invoke-api
         --path=path
@@ -569,7 +569,7 @@ class UserApi:
   - $body-arg: Created user object
   */
   create-user
-      body-arg
+      body-arg/User
   :
     // TODO.
     raw := create-user --raw
@@ -582,14 +582,14 @@ class UserApi:
     returns the raw response.
   */
   create-users-with-list-input --raw/True -> http.Response
-      body-arg
+      body-arg/List
   :
     path := "/user/createWithList"
     headers := http.Headers
     query-params := []
     cookie-params := []
 
-    headers.set "Content-" "application/json"
+    headers.set "Content-List" "application/json"
 
     return api-client_.invoke-api
         --path=path
@@ -605,7 +605,7 @@ class UserApi:
   - $body-arg: 
   */
   create-users-with-list-input
-      body-arg
+      body-arg/List
   :
     // TODO.
     raw := create-users-with-list-input --raw
@@ -652,8 +652,8 @@ class UserApi:
   - $password: The password for login in clear text
   */
   login-user
-      --username=null
-      --password=null
+      --username/string=null
+      --password/string=null
   :
     // TODO.
     raw := login-user --raw
@@ -719,7 +719,7 @@ class UserApi:
   - $username: The name that needs to be fetched. Use user1 for testing. 
   */
   get-user-by-name
-      --username
+      --username/string
   :
     // TODO.
     raw := get-user-by-name --raw
@@ -733,7 +733,7 @@ class UserApi:
   */
   update-user --raw/True -> http.Response
       --username/string
-      body-arg
+      body-arg/User
   :
     path := "/user/{username}"
     headers := http.Headers
@@ -743,7 +743,7 @@ class UserApi:
     if true:
       path = path.replace --all "{$("username")}" "$username"
 
-    headers.set "Content-" "application/json"
+    headers.set "Content-User" "application/json"
 
     return api-client_.invoke-api
         --path=path
@@ -760,8 +760,8 @@ class UserApi:
   - $body-arg: Update an existent user in the store
   */
   update-user
-      --username
-      body-arg
+      --username/string
+      body-arg/User
   :
     // TODO.
     raw := update-user --raw
@@ -798,7 +798,7 @@ class UserApi:
   - $username: The name that needs to be deleted
   */
   delete-user
-      --username
+      --username/string
   :
     // TODO.
     raw := delete-user --raw

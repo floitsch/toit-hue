@@ -52,9 +52,9 @@ class X-ApiClassName-x:
   */
   x-op-name-x --raw/True -> http.Response
   // MUSTACHE: {{#parameters}} Enter parameters
+  // MUSTACHE: Type={{type}}
   // MUSTACHE: {{#required}}
   // MUSTACHE: x-op-arg-x={{name}}
-  // MUSTACHE: Type={{type}}
       --x-op-arg-x/Type
   // MUSTACHE: {{/required}}
   // MUSTACHE: {{^required}}
@@ -63,7 +63,8 @@ class X-ApiClassName-x:
   // MUSTACHE: {{/required}}
   // MUSTACHE: {{/parameters}} Leave parameters
   // MUSTACHE: {{#request-body}}
-      body-arg
+  // MUSTACHE: Type={{type}}
+      body-arg/Type
   // MUSTACHE: {{/request-body}}
   :
     // MUSTACHE: x-api-path-x={{{path}}}
@@ -143,17 +144,19 @@ class X-ApiClassName-x:
   */
   x-op-name-x
       // MUSTACHE: {{#parameters}} Enter parameters
+      // MUSTACHE: Type={{type}}
       // MUSTACHE: {{#required}}
       // MUSTACHE: x-op-arg-x={{name}}
-      --x-op-arg-x
+      --x-op-arg-x/Type
       // MUSTACHE: {{/required}}
       // MUSTACHE: {{^required}}
       // MUSTACHE: x-op-other-arg-x={{name}}
-      --x-op-other-arg-x=null
+      --x-op-other-arg-x/Type=null
       // MUSTACHE: {{/required}}
       // MUSTACHE: {{/parameters}} Leave parameters
       // MUSTACHE: {{#request-body}}
-      body-arg
+      // MUSTACHE: Type={{type}}
+      body-arg/Type
       // MUSTACHE: {{/request-body}}
   :
     // TODO.
