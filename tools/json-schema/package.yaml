@@ -10,3 +10,5 @@ dependencies:
   json-pointer:
     url: github.com/toitware/toit-json-pointer
     version: ^1.0.0
+  namer:
+    path: ../toit-namer

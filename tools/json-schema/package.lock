@@ -3,6 +3,7 @@ prefixes:
   certificate-roots: toit-cert-roots
   http: pkg-http
   json-pointer: toit-json-pointer
+  namer: toit-namer
 packages:
   pkg-http:
     url: github.com/toitlang/pkg-http
@@ -19,3 +20,5 @@ packages:
     name: json-pointer
     version: 1.0.0
     hash: 675be26561f748f3aec146c0d6faa4cb66dfe9e5
+  toit-namer:
+    path: ../toit-namer

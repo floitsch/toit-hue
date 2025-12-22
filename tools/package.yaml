@@ -19,3 +19,5 @@ dependencies:
   mustache:
     url: github.com/toitware/toit-mustache
     version: ^1.0.1
+  namer:
+    path: toit-namer

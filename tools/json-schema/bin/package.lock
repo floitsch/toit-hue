@@ -52,7 +52,7 @@ packages:
   toit-json-pointer:
     url: github.com/toitware/toit-json-pointer
     name: json-pointer
-    version: 1.0.0
-    hash: 675be26561f748f3aec146c0d6faa4cb66dfe9e5
+    version: 1.1.0
+    hash: 4a6e180301d331831d67b514cc893f66a60f0d8e
   toit-namer:
     path: ../../toit-namer
