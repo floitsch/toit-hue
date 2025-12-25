@@ -89,6 +89,29 @@ class UriReference:
     if fragment: result = 97 * result + fragment.hash-code
     return result
 
+  compare-to other/UriReference -> int:
+    return compare-to other --if-equal=: 0
+
+  compare-to other/UriReference [--if-equal] -> int:
+    if scheme != other.scheme:
+      if scheme == null: return -1
+      if other.scheme == null: return 1
+      return scheme.compare-to other.scheme
+    if authority != other.authority:
+      if authority == null: return -1
+      if other.authority == null: return 1
+      return authority.compare-to other.authority
+    return path.compare-to other.path --if-equal=:
+      if query != other.query:
+        if query == null: return -1
+        if other.query == null: return 1
+        return query.compare-to other.query
+      if fragment != other.fragment:
+        if fragment == null: return -1
+        if other.fragment == null: return 1
+        return fragment.compare-to other.fragment
+      return if-equal.call
+
   to-string -> string:
     result := ""
     if scheme != null: result = "$scheme:"
