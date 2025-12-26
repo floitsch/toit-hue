@@ -38,4 +38,4 @@ gen invocation/cli.Invocation:
   print "Generating Toit code from schema '$schema-path' into directory '$output-dir'"
 
   generator := schema-gen.Gen output-dir
-  generator.gen schema.schema --path=schema-path
+  generator.gen schema

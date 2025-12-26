@@ -7,266 +7,336 @@ import namer
 import json-pointer show JsonPointer
 
 import .action
+import .json-schema
 import .schema
 import .store_
 import .uri
 
-abstract class GenVisitorBase:
-  visit-X-Of x-of/X-Of -> any:
-    if x-of.is-disabled: return null
-    if x-of.kind == X-Of.ALL-OF: return visit-AllOf x-of
-    else if x-of.kind == X-Of.ANY-OF: return visit-AnyOf x-of
-    else if x-of.kind == X-Of.ONE-OF: return visit-OneOf x-of
-    else: unreachable
+class Namer:
+  used/Set ::= {} // Of string.
+  mapped-names/Map ::= {:} // From UriReference to name.
 
-  abstract visit-AllOf x-of/X-Of -> any
-  abstract visit-AnyOf x-of/X-Of -> any
-  abstract visit-OneOf x-of/X-Of -> any
+  constructor --class-seed/Map?={:}:
+    if class-seed:
+      class-seed.do: | url/UriReference name/string |
+        class-name := namer.toit-class-name name
+        use-unique_ --url=url class-name
 
-class Type_:
-  schema/Schema
-  path/JsonPointer
-  one-ofs/List := []  // Of List of schemas.
-  all-ofs/List := []  // Of schemas.
-  any-ofs/List := []  // Of schemas.
-  dependent/List := []  // Of Map<String, Schema>.
-  fields/Set := {}
-  fields-required/Set := {}
-  reffed/Schema? := null
-  types/List? := null
-  description/string? := null
+  use-unique_ --url/UriReference name/string -> string:
+    attempt := name
+    i := 0
+    while used.contains attempt:
+      attempt = "$name$(i++)"
+    used.add attempt
+    mapped-names[url] = attempt
+    return attempt
 
-  constructor .schema .path:
+  use-class url/UriReference name/string -> string:
+    if mapped-names.contains url:
+      return mapped-names[url]
 
-class TypeVisitor extends GenVisitorBase implements ActionVisitor:
-  current-path/JsonPointer := JsonPointer
-  current-type/Type_? := null
-  schemas-to-types/Map ::= {:}
+    return use-unique_ --url=url name
 
-  visit schema/Schema --new-type/bool=false -> none:
-    old-type := current-type
-    if new-type:
-      current-type = Type_ schema current-path
-      schemas-to-types[schema] = current-type
+  operator [] url/UriReference -> string?:
+    return mapped-names.get url
+
+/** A namer for members (everything inside a class). */
+class MemberNamer:
+  used/Set ::= {} // Of string.
+
+  constructor:
+
+  reserve name/string -> none:
+    assert: not used.contains name
+    used.add name
+
+  use-member name/string -> string:
+    attempt := name
+    i := 0
+    while used.contains attempt:
+      attempt = "$name$(i++)"
+    used.add attempt
+    return attempt
+
+/**
+A visitor that assigns names to schemas.
+
+Each schema gets a name that could be used as a Toit class name.
+Many of these names won't be used, especially the names of
+  schemas that represent primitive types.
+*/
+class NameVisitor implements ActionVisitor:
+  current-class-name/string? := null
+  namer/Namer
+
+  constructor .namer:
+
+  visit schema/Schema --nested-name/string -> none:
+    url := schema.absolute-location
+    name/string := ?
+    if nested-name == "":
+      if not current-class-name: throw "Unable to name schema at $url"
+      name = current-class-name
+    else:
+      name = current-class-name
+          ? "$current-class-name-$nested-name"
+          : nested-name
+    current-class-name = namer.use-class url name
     schema.actions.do: | action/Action |
       action.accept this
-    current-type = old-type
-
-  visit segment schema/Schema --new-type/bool=false -> none:
-    old := current-path
-    current-path = current-path[segment]
-    visit schema --new-type=new-type
-    current-path = old
-
-  recurse-check-no-change_ [block]:
-    one-ofs-size := current-type.one-ofs.size
-    all-ofs-size := current-type.all-ofs.size
-    any-ofs-size := current-type.any-ofs.size
-    dependent-size := current-type.dependent.size
-    block.call
-    if current-type.one-ofs.size != one-ofs-size or
-        current-type.all-ofs.size != all-ofs-size or
-        current-type.any-ofs.size != any-ofs-size or
-        current-type.dependent.size != dependent-size:
-      throw "UNIMPLEMENTED: conditional hierarchy structure."
-
-  accept_ index o/Action -> none:
-    old := current-path
-    current-path = current-path[index]
-    o.accept this
-    current-path = old
 
   visit-Ref ref/Ref -> none:
-    if ref.is-dynamic: throw "UNIMPLEMENTED"
-    if ref.target:
-      current-type.reffed = ref.target
+    // Do nothing.
 
-  visit-AllOf x-of/X-Of -> none:
-    current-type.all-ofs.add-all x-of.subschemas
+  visit-X-Of x-of/X-Of -> none:
     x-of.subschemas.do: | schema/Schema |
-      visit "all-of" schema
-
-  visit-AnyOf x-of/X-Of -> none:
-    current-type.any-ofs.add-all x-of.subschemas
-    x-of.subschemas.do: | schema/Schema |
-      visit "any-of" schema
-
-  visit-OneOf x-of/X-Of -> none:
-    // Note that we add the subschemas as list, and don't merge
-    // all one-ofs.
-    current-type.one-ofs.add x-of.subschemas
-    x-of.subschemas.do: | schema/Schema |
-      visit "one-of" schema
+      visit schema --nested-name=""
 
   visit-Not not_/Not -> none:
-    // TODO(florian): do we need to go through not children?
-    return
+    // Do nothing.
 
   visit-IfThenElse if-then-else/IfThenElse -> none:
-    visit "condition" if-then-else.condition-subschema
-    recurse-check-no-change_:
-      visit "then" if-then-else.then-subschema
-      visit "else" if-then-else.else-subschema
+    visit if-then-else.condition-subschema --nested-name=""
+    visit if-then-else.then-subschema --nested-name=""
+    visit if-then-else.else-subschema --nested-name=""
 
   visit-DependentSchemas dependent-schemas/DependentSchemas -> none:
-    current-type.dependent.add dependent-schemas.subschemas
     dependent-schemas.subschemas.do: | schema/Schema |
-      visit "dependent-schemas" schema
+      visit schema --nested-name=""
 
   visit-Properties properties/Properties -> none:
     if properties.properties:
       properties.properties.do: | prop-name/string schema/Schema |
-        visit prop-name schema --new-type
-      current-type.fields.add-all properties.properties.keys
+        visit schema --nested-name=prop-name
 
-  visit-PropertyNames property-names/PropertyNames -> none: return
+  visit-PropertyNames _/PropertyNames -> none: return
 
-  visit-Contains contains/Contains -> none: return
+  visit-Contains _/Contains -> none: return
 
-  visit-Type type/Type -> none:
-    // TODO(florian): we should use this to type fields.
-    current-type.types = type.types
-    return
+  visit-Type _/Type -> none: return
 
-  visit-Enum enum_/Enum -> none:
-    // TODO(florian): we should use this to type fields.
-    return
+  visit-Enum _/Enum -> none: return
 
-  visit-Const const/Const -> none: return
+  visit-Const _/Const -> none: return
 
-  visit-NumComparison num-comparison/NumComparison -> none: return
+  visit-NumComparison _/NumComparison -> none: return
 
-  visit-StringLength string-length/StringLength -> none: return
+  visit-StringLength _StringLength -> none: return
 
-  visit-ArrayLength array-length/ArrayLength -> none: return
+  visit-ArrayLength _/ArrayLength -> none: return
 
-  visit-UniqueItems unique-items/UniqueItems -> none: return
+  visit-UniqueItems _/UniqueItems -> none: return
 
-  visit-Required required/Required -> none:
-    current-type.fields-required.add-all required.properties
+  visit-Required _/Required -> none: return
 
-  visit-ObjectSize object-size/ObjectSize -> none: return
+  visit-ObjectSize _/ObjectSize -> none: return
 
   visit-Items items/Items -> none:
-    if items.prefix-items and not items.prefix-items.is-empty:
-      print "Unhandled prefix-items"
     if items.items:
-      visit "items" items.items --new-type
+      visit items.items --nested-name="Element"
 
-  visit-Pattern pattern/Pattern -> none: return
+  visit-Pattern _/Pattern -> none: return
 
-  visit-DependentRequired dependent-required/DependentRequired -> none: return
+  visit-DependentRequired _/DependentRequired -> none: return
 
-  visit-UnevaluatedProperties unevaluated-properties/UnevaluatedProperties -> none:
-    visit "unevaluated-properties" unevaluated-properties.subschema --new-type
+  visit-UnevaluatedProperties _/UnevaluatedProperties -> none: return
 
-  visit-UnevaluatedItems unevaluated-items/UnevaluatedItems -> none:
-    visit "unevaluated-items" unevaluated-items.subschema --new-type
+  visit-UnevaluatedItems _/UnevaluatedItems -> none: return
 
-  visit-Annotation annotation/Annotation -> none:
-    if annotation.keyword == "description" and
-        annotation.value is string:
-      current-type.description = annotation.value
+  visit-Annotation _/Annotation -> none: return
 
-  visit-Format format/Format -> none: unreachable
-  visit-Discriminator discriminator/Discriminator -> none: unreachable
+  visit-Format _/Format -> none: return
 
-class Namer:
-  used/Map ::= {:} // From URL (without fragment) to a Set of strings.
+  visit-Discriminator _/Discriminator -> none: return
 
-  use-class url/UriReference [--if-unknown] -> string:
-    url-str := url.to-string
-    sharp-index := url-str.index-of "#"
-    base-url := sharp-index != -1 ? url-str[0..sharp-index] : url-str
-    fragment := sharp-index != -1 ? url_str[sharp-index + 1..] : ""
-    namer-set/Set ::= used.get base-url --init=: Set
+class SchemaType implements ActionVisitor:
+  schema/Schema
+  one-of/X-Of? := null
+  all-of/X-Of? := null
+  any-of/X-Of? := null
+  properties/Properties? := null
+  required/Required? := null
+  items/Items? := null
+  ref/Ref? := null
+  type/Type? := null
+  description-annotation/Annotation? := null
+  discriminator/Discriminator? := null
 
-    fragment = url-encoder.decode fragment
-    parts := fragment.split "/"
-    // Some heuristics to get nice names. This should probably get
-    // patches over time.
-    suggestion := ""
-    // Run through the fragments.
-    for i := 0; i < parts.size; i++:
-      part/string := parts[i]
-      if part == "\$defs" or part == "definitions" or
-          part == "properties" or part == "items":
-        continue
-      if suggestion == "":
-        suggestion = part
-        continue
-      suggestion = "$suggestion-$part"
-    if suggestion == "":
-      suggestion = if-unknown.call
+  constructor .schema:
+    schema.actions.do: | action/Action |
+      action.accept this
 
-    suggestion = namer.toit-class-name suggestion
-    attempt := suggestion
-    i := 0
-    while namer-set.contains attempt:
-      attempt = "$suggestion$(i++)"
-    namer-set.add attempt
-    return attempt
+  url -> UriReference:
+    return schema.absolute-location
+
+  type-name namer/Namer -> string:
+    if ref:
+      on-stack := {}
+      current-type := this
+      on-stack.add current-type.url
+      while current-type.ref:
+        current-ref := current-type.ref
+        current-type = SchemaType current-ref.target
+        if on-stack.contains current-type.url:
+          // Circular reference.
+          return "any"
+        on-stack.add current-type.url
+      return current-type.type-name namer
+    if type:
+      accepted-types := type.types
+      if accepted-types.size == 1:
+        type-string := accepted-types.first
+        if type-string == "null": return "Null"
+        if type-string == "boolean": return "bool"
+        if type-string == "object":
+          print url
+          return namer[url]
+        if type-string == "array": return "List"
+        if type-string == "number": return "num"
+        if type-string == "string": return "string"
+        if type-string == "integer": return "int"
+    return "any"
+
+  visit-Ref action/Ref -> none:
+    ref = action
+
+  visit-X-Of x-of/X-Of -> none:
+    if x-of.kind == X-Of.ALL-OF: all-of = x-of
+    else if x-of.kind == X-Of.ANY-OF: any-of = x-of
+    else if x-of.kind == X-Of.ONE-OF: one-of = x-of
+    else: unreachable
+
+  visit-AllOf action/X-Of -> none:
+    all-of = action
+
+  visit-AnyOf action/X-Of -> none:
+    any-of = action
+
+  visit-OneOf action/X-Of -> none:
+    one-of = action
+
+  visit-Not _/Not -> none: return
+  visit-IfThenElse _/IfThenElse -> none: return
+  visit-DependentSchemas _/DependentSchemas -> none: return
+
+  visit-Properties action/Properties -> none:
+    properties = action
+
+  visit-PropertyNames _/PropertyNames -> none: return
+  visit-Contains _/Contains -> none: return
+
+  visit-Type action/Type -> none:
+    type = action
+
+  visit-Enum _/Enum -> none: return
+  visit-Const _/Const -> none: return
+  visit-NumComparison _/NumComparison -> none: return
+  visit-StringLength _/StringLength -> none: return
+  visit-ArrayLength _/ArrayLength -> none: return
+  visit-UniqueItems _/UniqueItems -> none: return
+
+  visit-Required action/Required -> none:
+    required = action
+
+  visit-ObjectSize _/ObjectSize -> none: return
+
+  visit-Items action/Items -> none:
+    items = action
+
+  visit-Pattern _/Pattern -> none: return
+  visit-DependentRequired _/DependentRequired -> none: return
+  visit-UnevaluatedProperties _/UnevaluatedProperties -> none: return
+  visit-UnevaluatedItems _/UnevaluatedItems -> none: return
+  visit-Annotation action/Annotation -> none:
+    if action.keyword == "description" and
+        action.value is string:
+      description-annotation = action
+
+  visit-Format _/Format -> none: return
+  visit-Discriminator _/Discriminator -> none: return
 
 class Gen:
-  dir/string
-  used-files_/Set ::= {}
-  url-to-file_/Map ::= {:}  // From URL to file path.
-  url-to-namers_/Map ::= {:}
+  out-path/string
+  namer/Namer ::= Namer
+  done/Set ::= {}
+  generated/List ::= [] // Of string.
 
-  constructor .dir:
+  constructor .out-path:
 
-  gen schema/Schema --path/string:
-    url := schema.absolute-location
-    assert: not url-to-file_.contains url
-    last-segment := (url.path.split "/").last
-    file-path := "$dir/$(last-segment).toit"
-    i := 0
-    while true:
-      if not used-files_.contains file-path:
-        used-files_.add file-path
-        break
-      file-path = "$dir/$(last-segment)-$(i++).toit"
-    url-to-file_[url] = file-path
+  suggest-class-name uri/UriReference name/string -> none:
+    namer.use-class uri name
 
-    type-visitor := TypeVisitor
-    type-visitor.visit --new-type schema
-    reffed-schemas.do: | reffed/Schema |
-      if reffed == schema: continue.do
-      type-visitor.visit reffed --new-type
+  gen schema/JsonSchema --name/string?=null -> none:
+    schema.store_
+    name-visitor := NameVisitor namer
+    name-visitor.visit --nested-name=(name or "Root") schema.schema
+    print namer.mapped-names
 
-    names := compute-class-names_ (reffed-schemas + [schema])
-    print names
+    // At this point the namer has assigned names to all schemas.
+    // The 'type-names' map represents the actual type name we use for
+    // each schema. Differences arise when a schema has a '$ref', or
+    // if a schema represents a primitive type.
 
-    type-visitor.schemas-to-types.do: | schema/Schema type/Type_ |
-      print "Schema: $schema.absolute-location"
-      print "Name: $(names.get schema.absolute-location)"
-      print "Type path: $type.path"
-      print "Fields: $type.fields"
-      print "Required fields: $type.fields-required"
-      print "OneOfs: $(type.one-ofs.map: it.map: it.absolute-location)"
-      print "AllOfs: $(type.all-ofs.map: it.absolute-location)"
-      print "AnyOfs: $(type.any-ofs.map: it.absolute-location)"
-      print "Dependent schemas: $type.dependent"
-      print "Reffed: $(type.reffed and type.reffed.absolute-location)"
-      print "Types: $type.types"
-      print
+    type := SchemaType schema
+    gen-type type
 
+    print (generated.join "\n")
 
-  compute-class-names_ reffed/List -> Map:
-    urls := reffed.map: | schema/Schema |
-      schema.absolute-location
-    // We really only need prefixes to appear earlier.
-    urls.sort: | a/UriReference b/UriReference | a.compare-to b
+  gen-type type/SchemaType -> none:
+    if done.contains type.url:
+      return
+    done.add type.url
 
-    url-to-name := {:}
-    urls.do: | url-ref/UriReference |
-      url := url-ref.to-string
-      sharp-index := url.index-of "#"
-      base-url := sharp-index != -1 ? url[0..sharp-index] : url
-      namer/Namer := url-to-namers_.get url --init=(: Namer)
-      fragment := sharp-index != -1 ? url[sharp-index + 1..] : ""
-      url-to-name[url-ref] = namer.use-class
-          --fragment=fragment
-          --if-unknown=: "Root"
+    /*
+      schema/Schema
+  one-of/X-Of? := null
+  all-of/X-Of? := null
+  any-of/X-Of? := null
+  properties/Properties? := null
+  required/Required? := null
+  items/Items? := null
+  ref/Ref? := null
+  type/Type? := null
+  description-annotation/Annotation? := null
+  discriminator/Discriminator? := null
+*/
 
-    return url-to-name
+    if type.ref:
+      gen-type (SchemaType type.ref.target)
+      return
+
+    if not type.type or type.type.types != ["object"]:
+      return
+
+    url := type.url
+
+    member-namer := MemberNamer
+    member-namer.reserve "from-json"
+    member-namer.reserve "to-json"
+    member-namer.reserve "core"
+    // TODO(florian): this should come from the namer package.
+    KEYWORDS ::= ["return", "class",]
+    KEYWORDS.do: member-namer.reserve it
+    class-name := type.type-name namer
+    fields-code := ""
+    if type.properties:
+      type.properties.properties.do: | prop-name/string schema/Schema |
+        prop-type := SchemaType schema
+        gen-type prop-type
+        field-type-name := prop-type.type-name namer
+        is-required := false
+        if type.required:
+          is-required = type.required.properties.contains prop-name
+        initial-value := "?"
+        if not is-required:
+          field-type-name = "$field-type-name?"
+          initial-value = "null"
+        field-name := member-namer.use-member prop-name
+        fields-code += "  $field-name/$field-type-name = $initial-value\n"
+
+    code := """
+      class $class-name:
+        $fields-code
+        constructor.from-json data/Map:
+      """
+    generated.add code
