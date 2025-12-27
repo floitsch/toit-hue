@@ -143,11 +143,10 @@ abstract class InstantiatedSchema:
   operator [] segment/string sub-schema/Schema -> InstantiatedSchema:
     return InstantiatedSchema this segment sub-schema
 
-  do-schema-resources --reversed [block]:
-    if not reversed: throw "INVALID_ARGUMENT"
+  do-schema-resources --reversed/True [block]:
     do-schema-resources_ --reversed null block
 
-  do-schema-resources_ --reversed last-resource [block]:
+  do-schema-resources_ --reversed/True last-resource [block]:
     resources := []
     current := this
     while current != null:

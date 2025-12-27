@@ -58,6 +58,86 @@ class MemberNamer:
     used.add attempt
     return attempt
 
+class CollectRefTargetsVisitor implements ActionVisitor:
+  ref-targets/Set ::= {}  // of Schema.
+
+  visit schema/Schema -> none:
+    schema.actions.do: | action/Action |
+      action.accept this
+
+  visit-Ref ref/Ref -> none:
+    if ref.is-dynamic: throw "UNIMPLEMENTED"
+    ref-targets.add ref.target
+    ref.target.actions.do: | action/Action |
+      action.accept this
+
+  visit-X-Of x-of/X-Of -> none:
+    x-of.subschemas.do: | schema/Schema |
+      visit schema
+
+  visit-Not not_/Not -> none: return
+
+  visit-IfThenElse if-then-else/IfThenElse -> none:
+    visit if-then-else.condition-subschema
+    visit if-then-else.then-subschema
+    visit if-then-else.else-subschema
+
+  visit-DependentSchemas dependent-schemas/DependentSchemas -> none:
+    dependent-schemas.subschemas.do: | schema/Schema |
+      visit schema
+
+  visit-Properties properties/Properties -> none:
+    if properties.properties:
+      properties.properties.do: | _ schema/Schema |
+        visit schema
+    // TODO(florian): handle "additional".
+
+  visit-PropertyNames property-names/PropertyNames -> none: return
+
+  visit-Contains contains/Contains -> none: return
+
+  visit-Type type/Type -> none: return
+
+  visit-Enum enum_/Enum -> none: return
+
+  visit-Const const/Const -> none: return
+
+  visit-NumComparison num-comparison/NumComparison -> none: return
+
+  visit-StringLength string-length/StringLength -> none: return
+
+  visit-ArrayLength array-length/ArrayLength -> none: return
+
+  visit-UniqueItems unique-items/UniqueItems -> none: return
+
+  visit-Required required/Required -> none: return
+
+  visit-ObjectSize object-size/ObjectSize -> none: return
+
+  visit-Items items/Items -> none:
+    if items.prefix-items and not items.prefix-items.is-empty:
+      items.prefix-items.do: | schema/Schema |
+        visit schema
+    visit items.items
+
+  visit-Pattern pattern/Pattern -> none: return
+
+  visit-DependentRequired dependent-required/DependentRequired -> none: return
+
+  visit-UnevaluatedProperties unevaluated-properties/UnevaluatedProperties -> none:
+    visit unevaluated-properties.subschema
+
+  visit-UnevaluatedItems unevaluated-items/UnevaluatedItems -> none:
+    visit unevaluated-items.subschema
+
+  visit-Annotation annotation/Annotation -> none: return
+
+  visit-Format format/Format -> none: return
+
+  visit-Discriminator discriminator/Discriminator -> none:
+    discriminator.mapping.do --values: | schema/Schema |
+      visit schema
+
 /**
 A visitor that assigns names to schemas.
 
@@ -71,6 +151,18 @@ class NameVisitor implements ActionVisitor:
 
   constructor .namer:
 
+  visit schema/Schema [--if-no-name] -> none:
+    // Try to guess the name from the URL.
+    url := schema.absolute-location
+    fragment := url.fragment
+        ? url-encoder.decode url.fragment
+        : ""
+    segments := fragment.split "/"
+    name := segments.is-empty
+        ? if-no-name.call
+        : segments.last
+    visit schema --name=name
+
   visit schema/Schema --nested-name/string -> none:
     url := schema.absolute-location
     name/string := ?
@@ -81,9 +173,15 @@ class NameVisitor implements ActionVisitor:
       name = current-class-name
           ? "$current-class-name-$nested-name"
           : nested-name
+    visit schema --name=name
+
+  visit schema/Schema --name/string -> none:
+    url := schema.absolute-location
+    old-name := current-class-name
     current-class-name = namer.use-class url name
     schema.actions.do: | action/Action |
       action.accept this
+    current-class-name = old-name
 
   visit-Ref ref/Ref -> none:
     // Do nothing.
@@ -121,7 +219,7 @@ class NameVisitor implements ActionVisitor:
 
   visit-NumComparison _/NumComparison -> none: return
 
-  visit-StringLength _StringLength -> none: return
+  visit-StringLength _/StringLength -> none: return
 
   visit-ArrayLength _/ArrayLength -> none: return
 
@@ -188,13 +286,13 @@ class SchemaType implements ActionVisitor:
         type-string := accepted-types.first
         if type-string == "null": return "Null"
         if type-string == "boolean": return "bool"
-        if type-string == "object":
-          print url
-          return namer[url]
+        if type-string == "object": return namer[url]
         if type-string == "array": return "List"
         if type-string == "number": return "num"
         if type-string == "string": return "string"
         if type-string == "integer": return "int"
+    if one-of or all-of or any-of or properties:
+      return namer[url]
     return "any"
 
   visit-Ref action/Ref -> none:
@@ -266,19 +364,38 @@ class Gen:
   suggest-class-name uri/UriReference name/string -> none:
     namer.use-class uri name
 
-  gen schema/JsonSchema --name/string?=null -> none:
-    schema.store_
+  gen schemas/List -> none:
+    if schemas.is-empty:
+      throw "UNIMPLEMENTED"
+
+    // TODO(florian): handle dynamic refs.
+    // We need to collect all dynamic refs, and all the resource-uris.
+    // Then extract the possible target schemas from the store.
+    store := (schemas.first as JsonSchema).store_
+
+    ref-visitor := CollectRefTargetsVisitor
+    schemas.do: | schema/JsonSchema |
+      // Not really a target, but this way we have all
+      // transitive schemas we need.
+      ref-visitor.ref-targets.add schema.schema
+      ref-visitor.visit schema.schema
+
+    reffed := ref-visitor.ref-targets.to-list
+    reffed.sort: | a/Schema b/Schema |
+      a.absolute-location.to-string.compare-to b.absolute-location.to-string
+
     name-visitor := NameVisitor namer
-    name-visitor.visit --nested-name=(name or "Root") schema.schema
-    print namer.mapped-names
+    reffed.do: | schema/Schema |
+      name-visitor.visit schema --if-no-name=: "Root"
 
     // At this point the namer has assigned names to all schemas.
     // The 'type-names' map represents the actual type name we use for
     // each schema. Differences arise when a schema has a '$ref', or
     // if a schema represents a primitive type.
 
-    type := SchemaType schema
-    gen-type type
+    reffed.do: | schema/Schema |
+      type := SchemaType schema
+      gen-type type
 
     print (generated.join "\n")
 
@@ -305,7 +422,7 @@ class Gen:
       gen-type (SchemaType type.ref.target)
       return
 
-    if not type.type or type.type.types != ["object"]:
+    if type.type and type.type.types != ["object"]:
       return
 
     url := type.url
@@ -319,7 +436,7 @@ class Gen:
     KEYWORDS.do: member-namer.reserve it
     class-name := type.type-name namer
     fields-code := ""
-    if type.properties:
+    if type.properties and type.properties.properties:
       type.properties.properties.do: | prop-name/string schema/Schema |
         prop-type := SchemaType schema
         gen-type prop-type
@@ -336,7 +453,7 @@ class Gen:
 
     code := """
       class $class-name:
-        $fields-code
+      $fields-code
         constructor.from-json data/Map:
       """
     generated.add code

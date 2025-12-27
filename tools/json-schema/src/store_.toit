@@ -11,7 +11,7 @@ class Store:
   add uri/string schema/Schema:
     entries_[uri] = schema
 
-  add --dynamic/bool uri/string schema/Schema --fragment/string:
+  add --dynamic/True uri/string schema/Schema --fragment/string:
     entries_[uri] = schema
     dynamic-entries_[uri] = fragment
 
