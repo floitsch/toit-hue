@@ -267,6 +267,23 @@ class SchemaType implements ActionVisitor:
   url -> UriReference:
     return schema.absolute-location
 
+  single-type -> string?:
+    if ref: return (SchemaType ref.target).single-type
+    if not type: return null
+    accepted-types := type.types
+    if accepted-types.size != 1: return null
+    return accepted-types.first
+
+  is-map -> bool:
+    if ref: return (SchemaType ref.target).is-map
+    if not type: return false
+    if not properties: return false
+    if properties.properties: return false
+    return true
+
+  is-typed-map -> bool:
+    return is-map and properties.additional != null
+
   type-name namer/Namer -> string:
     if ref:
       on-stack := {}
@@ -280,20 +297,44 @@ class SchemaType implements ActionVisitor:
           return "any"
         on-stack.add current-type.url
       return current-type.type-name namer
-    if type:
-      accepted-types := type.types
-      if accepted-types.size == 1:
-        type-string := accepted-types.first
-        if type-string == "null": return "Null"
-        if type-string == "boolean": return "bool"
-        if type-string == "object": return namer[url]
-        if type-string == "array": return "List"
-        if type-string == "number": return "num"
-        if type-string == "string": return "string"
-        if type-string == "integer": return "int"
+    type-string := single-type
+    if type-string:
+      if type-string == "null": return "Null"
+      if type-string == "boolean": return "bool"
+      if type-string == "object":
+        if is-map: return "Map"
+        return namer[url]
+      if type-string == "array": return "List"
+      if type-string == "number": return "num"
+      if type-string == "string": return "string"
+      if type-string == "integer": return "int"
     if one-of or all-of or any-of or properties:
       return namer[url]
     return "any"
+
+  is-primitive -> bool:
+    type-string := single-type
+    if not type-string: return false
+    return type-string == "null" or
+        type-string == "boolean" or
+        type-string == "number" or
+        type-string == "string" or
+        type-string == "integer"
+
+  is-object -> bool:
+    type-string := single-type
+    if not type-string: return false
+    return type-string == "object"
+
+  convert-from-json expr/string --namer/Namer -> string:
+    if not is-object: return expr
+    if is-typed-map:
+      value-type := SchemaType properties.additional
+      return "$(expr).map: | _ v | $(value-type.convert-from-json "v" --namer=namer)"
+    if is-map:
+      return "($(expr)) as Map"
+    class-name := type-name namer
+    return "$(class-name).from-json $expr"
 
   visit-Ref action/Ref -> none:
     ref = action
@@ -425,6 +466,9 @@ class Gen:
     if type.type and type.type.types != ["object"]:
       return
 
+    if type.is-map:
+      return
+
     url := type.url
 
     member-namer := MemberNamer
@@ -436,6 +480,7 @@ class Gen:
     KEYWORDS.do: member-namer.reserve it
     class-name := type.type-name namer
     fields-code := ""
+    constructor-code := ""
     if type.properties and type.properties.properties:
       type.properties.properties.do: | prop-name/string schema/Schema |
         prop-type := SchemaType schema
@@ -450,10 +495,12 @@ class Gen:
           initial-value = "null"
         field-name := member-namer.use-member prop-name
         fields-code += "  $field-name/$field-type-name = $initial-value\n"
+        constructor-code += "    $field-name = $(prop-type.convert-from-json "data[\"$prop-name\"]" --namer=namer)\n"
 
     code := """
       class $class-name:
       $fields-code
         constructor.from-json data/Map:
+      $constructor-code
       """
     generated.add code
