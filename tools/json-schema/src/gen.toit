@@ -3,7 +3,8 @@
 // found in the LICENSE file.
 
 import encoding.url as url-encoder
-import namer
+import toit-gen
+import toit-gen.namer
 import json-pointer show JsonPointer
 
 import .action
@@ -14,7 +15,10 @@ import .uri
 
 class Namer:
   used/Set ::= {} // Of string.
-  mapped-names/Map ::= {:} // From UriReference to name.
+  classes/Map ::= {:}  // From UriReference to toit-gen.Class.
+  // TODO(florian): "any" shouldn't be a core class.
+  any-class/toit-gen.Class ::= toit-gen.Class.core "any"
+  list-class/toit-gen.Class ::= toit-gen.Class.core "List"
 
   constructor --class-seed/Map?={:}:
     if class-seed:
@@ -22,41 +26,24 @@ class Namer:
         class-name := namer.toit-class-name name
         use-unique_ --url=url class-name
 
-  use-unique_ --url/UriReference name/string -> string:
+  use-unique_ --url/UriReference name/string -> toit-gen.Class:
     attempt := name
     i := 0
     while used.contains attempt:
       attempt = "$name$(i++)"
     used.add attempt
-    mapped-names[url] = attempt
-    return attempt
+    clazz := toit-gen.Class attempt --kind=toit-gen.Class.CLASS
+    classes[url] = clazz
+    return clazz
 
-  use-class url/UriReference name/string -> string:
-    if mapped-names.contains url:
-      return mapped-names[url]
+  use-class url/UriReference name/string -> toit-gen.Class:
+    if classes.contains url:
+      return classes[url]
 
     return use-unique_ --url=url name
 
-  operator [] url/UriReference -> string?:
-    return mapped-names.get url
-
-/** A namer for members (everything inside a class). */
-class MemberNamer:
-  used/Set ::= {} // Of string.
-
-  constructor:
-
-  reserve name/string -> none:
-    assert: not used.contains name
-    used.add name
-
-  use-member name/string -> string:
-    attempt := name
-    i := 0
-    while used.contains attempt:
-      attempt = "$name$(i++)"
-    used.add attempt
-    return attempt
+  operator [] url/UriReference -> toit-gen.Class?:
+    return classes.get url
 
 class CollectRefTargetsVisitor implements ActionVisitor:
   ref-targets/Set ::= {}  // of Schema.
@@ -178,7 +165,7 @@ class NameVisitor implements ActionVisitor:
   visit schema/Schema --name/string -> none:
     url := schema.absolute-location
     old-name := current-class-name
-    current-class-name = namer.use-class url name
+    current-class-name = (namer.use-class url name).preferred-name
     schema.actions.do: | action/Action |
       action.accept this
     current-class-name = old-name
@@ -284,7 +271,7 @@ class SchemaType implements ActionVisitor:
   is-typed-map -> bool:
     return is-map and properties.additional != null
 
-  type-name namer/Namer -> string:
+  type namer/Namer -> toit-gen.Class:
     if ref:
       on-stack := {}
       current-type := this
@@ -399,6 +386,7 @@ class Gen:
   namer/Namer ::= Namer
   done/Set ::= {}
   generated/List ::= [] // Of string.
+  schema-to-clazz/Map ::= {:}
 
   constructor .out-path:
 
@@ -434,13 +422,15 @@ class Gen:
     // each schema. Differences arise when a schema has a '$ref', or
     // if a schema represents a primitive type.
 
+    program := toit-gen.Program
+
     reffed.do: | schema/Schema |
       type := SchemaType schema
-      gen-type type
+      gen-type type --program=program
 
     print (generated.join "\n")
 
-  gen-type type/SchemaType -> none:
+  gen-type type/SchemaType --program/toit-gen.Program -> none:
     if done.contains type.url:
       return
     done.add type.url
@@ -460,7 +450,7 @@ class Gen:
 */
 
     if type.ref:
-      gen-type (SchemaType type.ref.target)
+      gen-type (SchemaType type.ref.target) --program=program
       return
 
     if type.type and type.type.types != ["object"]:
@@ -471,20 +461,12 @@ class Gen:
 
     url := type.url
 
-    member-namer := MemberNamer
-    member-namer.reserve "from-json"
-    member-namer.reserve "to-json"
-    member-namer.reserve "core"
-    // TODO(florian): this should come from the namer package.
-    KEYWORDS ::= ["return", "class",]
-    KEYWORDS.do: member-namer.reserve it
     class-name := type.type-name namer
-    fields-code := ""
-    constructor-code := ""
+    clazz := toit-gen.Class class-name --kind=toit-gen.Class.CLASS
     if type.properties and type.properties.properties:
       type.properties.properties.do: | prop-name/string schema/Schema |
         prop-type := SchemaType schema
-        gen-type prop-type
+        gen-type prop-type --program=program
         field-type-name := prop-type.type-name namer
         is-required := false
         if type.required:

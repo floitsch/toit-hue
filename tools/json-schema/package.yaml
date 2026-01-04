@@ -12,3 +12,5 @@ dependencies:
     version: ^1.0.0
   namer:
     path: ../toit-namer
+  toit-gen:
+    path: ../toit-gen
