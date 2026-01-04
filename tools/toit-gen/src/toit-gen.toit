@@ -105,11 +105,20 @@ class VarDefinition implements RefTarget:
   is-named/bool
 
   constructor.parameter .preferred-name
-      --.type
-      --.initial
+      --.type=null
+      --.initial=null
       --.is-block=false
       --.is-named=false
       --.is-nullable=false:
+
+  constructor.ignored:
+    preferred-name = "_"
+    name = "_"
+    is-block = false
+    is-named = false
+    is-nullable = false
+    initial = null
+    type = null
 
   constructor.it:
     preferred-name = "it"
@@ -129,21 +138,22 @@ class VarDefinition implements RefTarget:
 
 class Call extends Expression:
   target/Expression
-  arguments/List ::= []  // Of Expression.
+  method-name/string? := null
+  arguments/List  // Of Expression.
 
-  constructor .target --.arguments:
+  constructor .target .method-name=null --.arguments=[]:
 
 class Block extends Expression:
-  parameters/List ::= []  // Of VarDefinition.
+  parameters/List  // Of VarDefinition.
   body/Statement
 
-  constructor .body:
+  constructor .body --.parameters=[]:
 
 class Lambda extends Expression:
-  parameters/List ::= []  // Of VarDefinition.
+  parameters/List  // Of VarDefinition.
   body/Statement
 
-  constructor .parameters .body:
+  constructor .body --.parameters=[]:
 
 /**
 A Toit statement.
@@ -154,6 +164,10 @@ In practice, however, some constructs clearly are only used in
   statement-like positions.
 */
 abstract class Statement:
+  constructor expr/Expression:
+    return ExpressionStatement expr
+
+  constructor:
 
 class Sequence extends Statement:
   statements/List ::= []  // Of Statement.

@@ -13,12 +13,18 @@ import .schema
 import .store_
 import .uri
 
-class Namer:
+class ClassManager:
   used/Set ::= {} // Of string.
   classes/Map ::= {:}  // From UriReference to toit-gen.Class.
   // TODO(florian): "any" shouldn't be a core class.
   any-class/toit-gen.Class ::= toit-gen.Class.core "any"
   list-class/toit-gen.Class ::= toit-gen.Class.core "List"
+  map-class/toit-gen.Class ::= toit-gen.Class.core "Map"
+  bool-class/toit-gen.Class ::= toit-gen.Class.core "bool"
+  int-class/toit-gen.Class ::= toit-gen.Class.core "int"
+  num-class/toit-gen.Class ::= toit-gen.Class.core "num"
+  string-class/toit-gen.Class ::= toit-gen.Class.core "string"
+  null-class/toit-gen.Class ::= toit-gen.Class.core "Null"
 
   constructor --class-seed/Map?={:}:
     if class-seed:
@@ -134,9 +140,9 @@ Many of these names won't be used, especially the names of
 */
 class NameVisitor implements ActionVisitor:
   current-class-name/string? := null
-  namer/Namer
+  class-manager/ClassManager
 
-  constructor .namer:
+  constructor .class-manager:
 
   visit schema/Schema [--if-no-name] -> none:
     // Try to guess the name from the URL.
@@ -165,7 +171,7 @@ class NameVisitor implements ActionVisitor:
   visit schema/Schema --name/string -> none:
     url := schema.absolute-location
     old-name := current-class-name
-    current-class-name = (namer.use-class url name).preferred-name
+    current-class-name = (class-manager.use-class url name).preferred-name
     schema.actions.do: | action/Action |
       action.accept this
     current-class-name = old-name
@@ -271,7 +277,7 @@ class SchemaType implements ActionVisitor:
   is-typed-map -> bool:
     return is-map and properties.additional != null
 
-  type namer/Namer -> toit-gen.Class:
+  type class-manager/ClassManager -> toit-gen.Class:
     if ref:
       on-stack := {}
       current-type := this
@@ -281,23 +287,23 @@ class SchemaType implements ActionVisitor:
         current-type = SchemaType current-ref.target
         if on-stack.contains current-type.url:
           // Circular reference.
-          return "any"
+          return class-manager.any-class
         on-stack.add current-type.url
-      return current-type.type-name namer
+      return current-type.type class-manager
     type-string := single-type
     if type-string:
-      if type-string == "null": return "Null"
-      if type-string == "boolean": return "bool"
+      if type-string == "null": return class-manager.null-class
+      if type-string == "boolean": return class-manager.bool-class
       if type-string == "object":
-        if is-map: return "Map"
-        return namer[url]
-      if type-string == "array": return "List"
-      if type-string == "number": return "num"
-      if type-string == "string": return "string"
-      if type-string == "integer": return "int"
+        if is-map: return class-manager.map-class
+        return class-manager[url]
+      if type-string == "array": return class-manager.list-class
+      if type-string == "number": return class-manager.num-class
+      if type-string == "string": return class-manager.string-class
+      if type-string == "integer": return class-manager.int-class
     if one-of or all-of or any-of or properties:
-      return namer[url]
-    return "any"
+      return class-manager[url]
+    return class-manager.any-class
 
   is-primitive -> bool:
     type-string := single-type
@@ -313,14 +319,22 @@ class SchemaType implements ActionVisitor:
     if not type-string: return false
     return type-string == "object"
 
-  convert-from-json expr/string --namer/Namer -> string:
+  convert-from-json expr/toit-gen.Expression --class-manager/ClassManager -> toit-gen.Expression:
     if not is-object: return expr
     if is-typed-map:
       value-type := SchemaType properties.additional
-      return "$(expr).map: | _ v | $(value-type.convert-from-json "v" --namer=namer)"
+      value-def := toit-gen.VarDefinition.parameter "v"
+      value-ref := toit-gen.Ref value-def
+      element-conversion := value-type.convert-from-json value-ref
+          --class-manager=class-manager
+      block := toit-gen.Block --parameters=[toit-gen.VarDefinition.ignored, value-def]
+          toit-gen.Statement element-conversion
+      map-call := toit-gen.Call expr "map"
+      element-conversion := value-type.convert-from-json "v" --class-manager=class-manager
+      return "$(expr).map: | _ v | $element-conversion"
     if is-map:
       return "($(expr)) as Map"
-    class-name := type-name namer
+    class-name := type class-manager
     return "$(class-name).from-json $expr"
 
   visit-Ref action/Ref -> none:
