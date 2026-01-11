@@ -30,6 +30,25 @@ class Ref extends Expression:
 
   constructor .target:
 
+class As extends Expression:
+  expression/Expression
+  type/RefTarget
+
+  constructor .expression .type:
+
+class Is extends Expression:
+  expression/Expression
+  type/RefTarget
+
+  constructor .expression .type:
+
+class Binary extends Expression:
+  left/Expression
+  op/string
+  right/Expression
+
+  constructor .left .op .right:
+
 class Named extends Expression:
   parameter/VarDefinition
   value/Expression
@@ -98,18 +117,20 @@ class Operator extends Function:
 class VarDefinition implements RefTarget:
   preferred-name/string
   name/string? := null
-  type/Ref?
+  type/RefTarget?
   initial/Expression?
   is-nullable/bool  // Only used if $type is not null.
   is-block/bool
   is-named/bool
+  is-final/bool
 
   constructor.parameter .preferred-name
       --.type=null
       --.initial=null
       --.is-block=false
       --.is-named=false
-      --.is-nullable=false:
+      --.is-nullable=false
+      --.is-final=false:
 
   constructor.ignored:
     preferred-name = "_"
@@ -119,6 +140,7 @@ class VarDefinition implements RefTarget:
     is-nullable = false
     initial = null
     type = null
+    is-final = false
 
   constructor.it:
     preferred-name = "it"
@@ -128,11 +150,21 @@ class VarDefinition implements RefTarget:
     is-nullable = false
     initial = null
     type = null
+    is-final = false
 
   constructor.local .preferred-name
       --.type=null
       --.is-nullable=false
+      --.is-final=false
       --.initial/Expression:
+    is-block = false
+    is-named = false
+
+  constructor.field .preferred-name
+      --.type=null
+      --.is-nullable=false
+      --.is-final=true
+      --.initial/Expression?:
     is-block = false
     is-named = false
 
@@ -142,6 +174,18 @@ class Call extends Expression:
   arguments/List  // Of Expression.
 
   constructor .target .method-name=null --.arguments=[]:
+
+class Index extends Expression:
+  target/Expression
+  index/Expression
+
+  constructor .target .index:
+
+class Assign extends Expression:
+  target/RefTarget
+  value/Expression
+
+  constructor .target .value:
 
 class Block extends Expression:
   parameters/List  // Of VarDefinition.
@@ -154,6 +198,13 @@ class Lambda extends Expression:
   body/Statement
 
   constructor .body --.parameters=[]:
+
+class Literal extends Expression:
+  value/any
+
+  constructor .value:
+
+class LateInitialized extends Expression:
 
 /**
 A Toit statement.
@@ -172,9 +223,12 @@ abstract class Statement:
 class Sequence extends Statement:
   statements/List ::= []  // Of Statement.
 
-  define preferred-name/string --type/Ref?=null initial/Expression -> VarDefinition:
+  add statement/Statement -> none:
+    statements.add statement
+
+  define preferred-name/string --type/RefTarget?=null initial/Expression -> VarDefinition:
     definition := VarDefinition.local preferred-name --initial=initial --type=type
-    statements.add definition
+    add (LocalDefinition definition)
     return definition
 
   call target/Expression -> none:
@@ -188,15 +242,19 @@ class Sequence extends Statement:
 
   call target/Expression --arguments/List -> none:
     expr := Call target --arguments=arguments
-    statements.add expr
+    add (Statement expr)
 
-  iff condition/Expression then-branch/Statement else-branch/Statement?=null:
+  iff condition/Expression then-branch/Statement else-branch/Statement?=null -> none:
     if-statement := If condition then-branch else-branch
-    statements.add if-statement
+    add if-statement
 
-  ret value/Expression?=null:
+  ret value/Expression?=null -> none:
     return-statement := Return value
-    statements.add return-statement
+    add return-statement
+
+  assign target/RefTarget value/Expression -> none:
+    assign := Assign target value
+    add (Statement assign)
 
 class If extends Statement:
   condition/Expression
@@ -215,3 +273,7 @@ class ExpressionStatement extends Statement:
 
   constructor .expression:
 
+class LocalDefinition extends Statement:
+  definition/VarDefinition
+
+  constructor .definition:

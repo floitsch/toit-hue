@@ -329,13 +329,13 @@ class SchemaType implements ActionVisitor:
           --class-manager=class-manager
       block := toit-gen.Block --parameters=[toit-gen.VarDefinition.ignored, value-def]
           toit-gen.Statement element-conversion
-      map-call := toit-gen.Call expr "map"
-      element-conversion := value-type.convert-from-json "v" --class-manager=class-manager
-      return "$(expr).map: | _ v | $element-conversion"
+      map-call := toit-gen.Call expr "map" --arguments=[block]
+      return map-call
     if is-map:
-      return "($(expr)) as Map"
+      return toit-gen.As expr class-manager.map-class
     class-name := type class-manager
-    return "$(class-name).from-json $expr"
+    return toit-gen.Call (toit-gen.Ref class-name) "from-json"
+        --arguments=[expr]
 
   visit-Ref action/Ref -> none:
     ref = action
@@ -475,24 +475,31 @@ class Gen:
 
     url := type.url
 
-    class-name := type.type-name namer
-    clazz := toit-gen.Class class-name --kind=toit-gen.Class.CLASS
+    clazz := type.type namer
+    data-arg := toit-gen.VarDefinition.parameter "data"
+        --type=toit-gen.Class.core "Map"
+    constructor-body := toit-gen.Sequence
     if type.properties and type.properties.properties:
       type.properties.properties.do: | prop-name/string schema/Schema |
         prop-type := SchemaType schema
         gen-type prop-type --program=program
-        field-type-name := prop-type.type-name namer
+        field-type := prop-type.type namer
         is-required := false
         if type.required:
           is-required = type.required.properties.contains prop-name
-        initial-value := "?"
-        if not is-required:
-          field-type-name = "$field-type-name?"
-          initial-value = "null"
-        field-name := member-namer.use-member prop-name
-        fields-code += "  $field-name/$field-type-name = $initial-value\n"
-        constructor-code += "    $field-name = $(prop-type.convert-from-json "data[\"$prop-name\"]" --namer=namer)\n"
-
+        initial := is-required
+            ? toit-gen.LateInitialized
+            : toit-gen.Literal null
+        field := toit-gen.VarDefinition.field prop-name
+            --type=field-type
+            --is-nullable=not is-required
+            --initial=initial
+            --is-final=false
+        clazz.fields.add field
+        index := toit-gen.Index (toit-gen.Ref data-arg) (toit-gen.Literal prop-name)
+        converted := prop-type.convert-from-json index
+            --class-manager=namer.class-manager
+        constructor-body.assign field converted
     code := """
       class $class-name:
       $fields-code
