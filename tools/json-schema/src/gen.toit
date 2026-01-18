@@ -240,6 +240,12 @@ class NameVisitor implements ActionVisitor:
 
   visit-Discriminator _/Discriminator -> none: return
 
+class QualifiedType_:
+  uri/UriReference?  // The JSON-Schema URL of the type, or null if Core.
+  clazz/toit-gen.Class
+
+  constructor .clazz --.uri=null:
+
 class SchemaType implements ActionVisitor:
   schema/Schema
   one-of/X-Of? := null
@@ -277,7 +283,7 @@ class SchemaType implements ActionVisitor:
   is-typed-map -> bool:
     return is-map and properties.additional != null
 
-  type class-manager/ClassManager -> toit-gen.Class:
+  type class-manager/ClassManager -> QualifiedType_:
     if ref:
       on-stack := {}
       current-type := this
@@ -287,23 +293,29 @@ class SchemaType implements ActionVisitor:
         current-type = SchemaType current-ref.target
         if on-stack.contains current-type.url:
           // Circular reference.
-          return class-manager.any-class
+          return QualifiedType_ class-manager.any-class
         on-stack.add current-type.url
       return current-type.type class-manager
     type-string := single-type
     if type-string:
-      if type-string == "null": return class-manager.null-class
-      if type-string == "boolean": return class-manager.bool-class
+      if type-string == "null":
+        return QualifiedType_ class-manager.null-class
+      if type-string == "boolean":
+        return QualifiedType_ class-manager.bool-class
       if type-string == "object":
-        if is-map: return class-manager.map-class
-        return class-manager[url]
-      if type-string == "array": return class-manager.list-class
-      if type-string == "number": return class-manager.num-class
-      if type-string == "string": return class-manager.string-class
-      if type-string == "integer": return class-manager.int-class
+        if is-map: return QualifiedType_ class-manager.map-class
+        return QualifiedType_ class-manager[url] --uri=url
+      if type-string == "array":
+        return QualifiedType_ class-manager.list-class
+      if type-string == "number":
+        return QualifiedType_ class-manager.num-class
+      if type-string == "string":
+        return QualifiedType_ class-manager.string-class
+      if type-string == "integer":
+        return QualifiedType_ class-manager.int-class
     if one-of or all-of or any-of or properties:
-      return class-manager[url]
-    return class-manager.any-class
+      return QualifiedType_ class-manager[url] --uri=url
+    return QualifiedType_ class-manager.any-class
 
   is-primitive -> bool:
     type-string := single-type
@@ -319,7 +331,10 @@ class SchemaType implements ActionVisitor:
     if not type-string: return false
     return type-string == "object"
 
-  convert-from-json expr/toit-gen.Expression --class-manager/ClassManager -> toit-gen.Expression:
+  convert-from-json expr/toit-gen.Expression -> toit-gen.Expression
+      --class-manager/ClassManager
+      [--gen-ref]
+      :
     if not is-object: return expr
     if is-typed-map:
       value-type := SchemaType properties.additional
@@ -327,14 +342,15 @@ class SchemaType implements ActionVisitor:
       value-ref := toit-gen.Ref value-def
       element-conversion := value-type.convert-from-json value-ref
           --class-manager=class-manager
+          --gen-ref=gen-ref
       block := toit-gen.Block --parameters=[toit-gen.VarDefinition.ignored, value-def]
           toit-gen.Statement element-conversion
       map-call := toit-gen.Call expr "map" --arguments=[block]
       return map-call
     if is-map:
       return toit-gen.As expr class-manager.map-class
-    class-name := type class-manager
-    return toit-gen.Call (toit-gen.Ref class-name) "from-json"
+    self-ref/toit-gen.Ref := gen-ref.call this
+    return toit-gen.Call self-ref "from-json"
         --arguments=[expr]
 
   visit-Ref action/Ref -> none:
@@ -397,15 +413,35 @@ class SchemaType implements ActionVisitor:
 
 class Gen:
   out-path/string
-  namer/Namer ::= Namer
   done/Set ::= {}
-  generated/List ::= [] // Of string.
   schema-to-clazz/Map ::= {:}
+  class-manager/ClassManager ::= ClassManager
+  // TODO(florian): make this a map from uri to library when we
+  // support multiple libraries.
+  out-gen/LibraryGen? := null
 
   constructor .out-path:
 
-  suggest-class-name uri/UriReference name/string -> none:
-    namer.use-class uri name
+  gen-type type/SchemaType -> QualifiedType_:
+    result := type.type class-manager
+
+    if done.contains type.url:
+      return result
+    done.add type.url
+
+    if type.ref:
+      gen-type (SchemaType type.ref.target)
+      return result
+
+    if type.type and type.type.types != ["object"]:
+      return result
+
+    if type.is-map:
+      return result
+
+    library-gen := library-gen-for-url_ type.url
+    library-gen.gen-class type
+    return result
 
   gen schemas/List -> none:
     if schemas.is-empty:
@@ -427,7 +463,7 @@ class Gen:
     reffed.sort: | a/Schema b/Schema |
       a.absolute-location.to-string.compare-to b.absolute-location.to-string
 
-    name-visitor := NameVisitor namer
+    name-visitor := NameVisitor class-manager
     reffed.do: | schema/Schema |
       name-visitor.visit schema --if-no-name=: "Root"
 
@@ -438,52 +474,56 @@ class Gen:
 
     program := toit-gen.Program
 
+    // TODO(florian): split into multiple libraries.
+    library := toit-gen.Library out-path
+    program.libraries.add library
+    out-gen = LibraryGen library --program-gen=this
+
     reffed.do: | schema/Schema |
       type := SchemaType schema
-      gen-type type --program=program
+      gen-type type
 
-    print (generated.join "\n")
+    file-map := program.gen --in-memory
+    file-map.do: | path/string code/string |
+      print "path: $path"
+      print code
+      print "=============================="
+      print
 
-  gen-type type/SchemaType --program/toit-gen.Program -> none:
-    if done.contains type.url:
-      return
-    done.add type.url
+  library-gen-for-url_ uri/UriReference -> LibraryGen:
+    // For now, all generated classes go into the same library.
+    return out-gen
 
-    /*
-      schema/Schema
-  one-of/X-Of? := null
-  all-of/X-Of? := null
-  any-of/X-Of? := null
-  properties/Properties? := null
-  required/Required? := null
-  items/Items? := null
-  ref/Ref? := null
-  type/Type? := null
-  description-annotation/Annotation? := null
-  discriminator/Discriminator? := null
-*/
+class LibraryGen:
+  library/toit-gen.Library
+  program-gen/Gen
+  core-import/toit-gen.Import
 
-    if type.ref:
-      gen-type (SchemaType type.ref.target) --program=program
-      return
+  constructor .library --.program-gen/Gen:
+    core-import = toit-gen.Import ["core"]
+    library.imports.add core-import
 
-    if type.type and type.type.types != ["object"]:
-      return
+  class-manager -> ClassManager:
+    return program-gen.class-manager
 
-    if type.is-map:
-      return
-
-    url := type.url
-
-    clazz := type.type namer
+  gen-class type/SchemaType -> none:
+    qualified-clazz := type.type class-manager
+    clazz := qualified-clazz.clazz
+    map-class := toit-gen.Class.core "Map"
     data-arg := toit-gen.VarDefinition.parameter "data"
-        --type=toit-gen.Class.core "Map"
+        --type=toit-gen.ImportedRef core-import class-manager.map-class
     constructor-body := toit-gen.Sequence
     if type.properties and type.properties.properties:
       type.properties.properties.do: | prop-name/string schema/Schema |
         prop-type := SchemaType schema
-        gen-type prop-type --program=program
-        field-type := prop-type.type namer
+        field-qualified-type := program-gen.gen-type prop-type
+        field-type-import := gen-import_ field-qualified-type
+        field-type-ref/toit-gen.Ref := ?
+        if field-type-import:
+          field-type-ref = toit-gen.ImportedRef field-type-import field-qualified-type.clazz
+        else:
+          field-type-ref = toit-gen.Ref field-qualified-type.clazz
+
         is-required := false
         if type.required:
           is-required = type.required.properties.contains prop-name
@@ -491,19 +531,29 @@ class Gen:
             ? toit-gen.LateInitialized
             : toit-gen.Literal null
         field := toit-gen.VarDefinition.field prop-name
-            --type=field-type
+            --type=field-type-ref
             --is-nullable=not is-required
             --initial=initial
             --is-final=false
         clazz.fields.add field
         index := toit-gen.Index (toit-gen.Ref data-arg) (toit-gen.Literal prop-name)
         converted := prop-type.convert-from-json index
-            --class-manager=namer.class-manager
+            --class-manager=class-manager
+            --gen-ref=: | type/SchemaType |
+              qualified := program-gen.gen-type type
+              imp := gen-import_ qualified
+              if imp:
+                toit-gen.ImportedRef imp clazz
+              else:
+                toit-gen.Ref clazz
         constructor-body.assign field converted
-    code := """
-      class $class-name:
-      $fields-code
-        constructor.from-json data/Map:
-      $constructor-code
-      """
-    generated.add code
+    constr := toit-gen.Function.constr --parameters=[data-arg] constructor-body
+    clazz.members.add constr
+    library.classes.add clazz
+
+  gen-import_ qualified/QualifiedType_ -> toit-gen.Import?:
+    uri := qualified.uri
+    if not uri: core-import
+    // For now, all generated classes go into the same library.
+    return null
+

@@ -6,65 +6,287 @@
 Library to create Toit code.
 */
 
+import fs
+import io
+import host.directory
+import host.file
+
 import .namer
 
-class Program:
+class WriteContext_:
+  indent-level/int := 0
+  writer/io.Writer
+
+  constructor .writer/io.Writer:
+
+  indent -> none:
+    indent-level += 1
+
+  dedent -> none:
+    indent-level -= 1
+    if indent-level < 0:
+      throw "INVALID_STATE"
+
+  write-line line/string -> none:
+    writer.write "  " * indent-level
+    writer.write line
+    writer.write "\n"
+
+interface NodeVisitor:
+  visit-Program node/Program -> any
+  visit-Library node/Library -> any
+
+  visit-Import node/Import -> any
+  visit-Export node/Export -> any
+
+  visit-Class node/Class -> any
+  visit-Function node/Function -> any
+  visit-Operator node/Function -> any
+
+  visit-VarDefinition node/VarDefinition -> any
+
+  // Statements.
+  visit-Sequence node/Sequence -> any
+  visit-If node/If -> any
+  visit-Return node/Return -> any
+  visit-ExpressionStatement node/ExpressionStatement -> any
+  visit-LocalDefinition node/LocalDefinition -> any
+
+  // Expressions.
+  visit-Call node/Call -> any
+  visit-Index node/Index -> any
+  visit-Assign node/Assign -> any
+  visit-Block node/Block -> any
+  visit-Lambda node/Lambda -> any
+  visit-Literal node/Literal -> any
+  visit-LateInitialized node/LateInitialized -> any
+  visit-Ref node/Ref -> any
+  visit-ImportedRef node/ImportedRef -> any
+  visit-As node/As -> any
+  visit-Is node/Is -> any
+  visit-Binary node/Binary -> any
+  visit-Named node/Named -> any
+
+class TraversingVisitor implements NodeVisitor:
+  visit-Program node/Program -> any:
+    node.libraries.do: it.accept this
+    return null
+
+  visit-Library node/Library -> any:
+    node.imports.do: it.accept this
+    node.exports.do: it.accept this
+    node.classes.do: it.accept this
+    node.globals.do: it.accept this
+    node.functions.do: it.accept this
+    return null
+
+  visit-Import node/Import -> any:
+    return null
+
+  visit-Export node/Export -> any:
+    node.exports.do: it.accept this
+    return null
+
+  visit-Class node/Class -> any:
+    node.static-fields.do: it.accept this
+    node.static-functions.do: it.accept this
+    node.fields.do: it.accept this
+    node.members.do: it.accept this
+    return null
+
+  visit-Function node/Function -> any:
+    node.parameters.do: it.accept this
+    if node.return-type: node.return-type.accept this
+    if node.body: node.body.accept this
+    return null
+
+  visit-Operator node/Function -> any:
+    return visit-Function node
+
+  visit-VarDefinition node/VarDefinition -> any:
+    if node.initial: node.initial.accept this
+    return null
+
+  // Statements.
+  visit-Sequence node/Sequence -> any:
+    node.statements.do: it.accept this
+    return null
+
+  visit-If node/If -> any:
+    node.condition.accept this
+    node.then-branch.accept this
+    if node.else-branch: node.else-branch.accept this
+    return null
+
+  visit-Return node/Return -> any:
+    if node.value: node.value.accept this
+    return null
+
+  visit-ExpressionStatement node/ExpressionStatement -> any:
+    node.expression.accept this
+    return null
+
+  visit-LocalDefinition node/LocalDefinition -> any:
+    node.definition.accept this
+    return null
+
+  // Expressions.
+  visit-Call node/Call -> any:
+    node.target.accept this
+    node.arguments.do: it.accept this
+    return null
+
+  visit-Index node/Index -> any:
+    node.target.accept this
+    node.index.accept this
+    return null
+
+  visit-Assign node/Assign -> any:
+    node.value.accept this
+    return null
+
+  visit-Block node/Block -> any:
+    node.parameters.do: it.accept this
+    node.body.accept this
+    return null
+
+  visit-Lambda node/Lambda -> any:
+    node.parameters.do: it.accept this
+    node.body.accept this
+    return null
+
+  visit-Literal node/Literal -> any:
+    return null
+
+  visit-LateInitialized node/LateInitialized -> any:
+    return null
+
+  visit-Ref node/Ref -> any:
+    return null
+
+  visit-ImportedRef node/ImportedRef -> any:
+    return null
+
+  visit-As node/As -> any:
+    node.expression.accept this
+    return null
+
+  visit-Is node/Is -> any:
+    node.expression.accept this
+    return null
+
+  visit-Binary node/Binary -> any:
+    node.left.accept this
+    node.right.accept this
+    return null
+
+  visit-Named node/Named -> any:
+    node.value.accept this
+    return null
+
+class NamingVisitor extends TraversingVisitor:
+  visit-Program node/Program -> none:
+    node.libraries.do: | library/Library |
+      null
+
+  visit-Import node/Import:
+    if node.preferred-prefix:
+      node.preferred-prefix = toit-prefix-name node.preferred-prefix
+    super node
+
+
+
+interface Node:
+  accept visitor/NodeVisitor -> any
+
+class Program implements Node:
   libraries/List ::= []
 
-class Library:
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Program this
+
+  gen -> none:
+    assign-names_
+    libraries.do: | library/Library |
+      path := library.path
+      dir := fs.dirname path
+      if not file.is-directory dir:
+        if file.is-file dir:
+          throw "Cannot create directory $dir: A file with that name exists."
+        directory.mkdir --recursive dir
+      stream := file.Stream.for-write path
+      context := WriteContext_ stream.out
+      library.gen_ context
+      stream.close
+
+  gen --in-memory/True -> Map:
+    assign-names_
+    result := {:}
+    libraries.do: | library/Library |
+      buffer := io.Buffer
+      context := WriteContext_ buffer
+      library.gen_ context
+      code := buffer.to-string
+      result[library.path] = code
+    return result
+
+class Library implements Node:
   path/string
   imports/List ::= []  // Of Import.
+  exports/List ::= []  // Of Export.
   statics/List ::= []
   classes/List ::= []  // Of Class.
+  globals/List ::= []  // Of VarDefinition.
+  functions/List ::= []  // Of Function.
 
   constructor .path:
 
-interface RefTarget:
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Library this
 
-abstract class Expression:
+  gen_ context/WriteContext_ -> none:
+    imports.do: | imp/Import |
+      if imp.refs.is-empty: continue.do
+      line := "import "
+      if imp.is-relative:
+        line += "."
+      line += imp.segments.join "."
+      if imp.show-all:
+        line += " show *"
+      else if imp.prefix:
+        line += " as $imp.prefix"
+      else:
+        line += " show "
+        ref-names := imp.refs.map: | ref/Ref | ref.target.name
+        line += ref-names.join " "
+      context.write-line line
 
-class Local implements RefTarget:
+    // TODO(florian): implement rest.
 
-class Ref extends Expression:
-  target/RefTarget
-
-  constructor .target:
-
-class As extends Expression:
-  expression/Expression
-  type/RefTarget
-
-  constructor .expression .type:
-
-class Is extends Expression:
-  expression/Expression
-  type/RefTarget
-
-  constructor .expression .type:
-
-class Binary extends Expression:
-  left/Expression
-  op/string
-  right/Expression
-
-  constructor .left .op .right:
-
-class Named extends Expression:
-  parameter/VarDefinition
-  value/Expression
-
-  constructor .parameter .value:
-
-class Import:
+class Import implements Node:
   is-relative/bool
   segments/List  // Of string.
+  preferred-prefix/string? := null
+  prefix/string? := null
   show-all/bool
-  show/List ::= []  // Of Ref.
+  refs/List ::= []  // Of ImportedRef.
 
-  constructor .segments --.is-relative=false --.show-all=false:
+  constructor .segments
+      --.preferred-prefix=null
+      --.is-relative=false
+      --.show-all=false:
 
-class Export:
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Import this
+
+  is-core -> bool:
+    return segments.size == 1 and segments[0] == "core"
+
+class Export implements Node:
   exports/List ::= []  // Of Ref.
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Export this
 
 class Class implements RefTarget:
   static CLASS ::= 0
@@ -94,14 +316,34 @@ class Class implements RefTarget:
     is-abstract = false
     super-class = null
 
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Class this
+
 class Function:
-  name/string
+  preferred-name/string
+  name/string? := null
   parameters/List ::= []  // Of VarDefinition.
   return-type/Ref?
   body/Statement? := null
   is-abstract/bool
+  is-static/bool
 
-  constructor .name --.parameters --.return-type --.is-abstract=false .body=null:
+  constructor .preferred-name
+      --.parameters
+      --.return-type
+      --.is-abstract=false
+      --.is-static=false
+      .body=null:
+
+  constructor.constr --.parameters .body=null:
+    preferred-name = "constructor"
+    name = "constructor"
+    is-abstract = false
+    is-static = false
+    return-type = null
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Function this
 
 class Operator extends Function:
   operator-string/string
@@ -114,10 +356,13 @@ class Operator extends Function:
         --is-abstract=is-abstract
         body
 
-class VarDefinition implements RefTarget:
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Operator this
+
+class VarDefinition implements RefTarget Node:
   preferred-name/string
   name/string? := null
-  type/RefTarget?
+  type/Ref?
   initial/Expression?
   is-nullable/bool  // Only used if $type is not null.
   is-block/bool
@@ -168,43 +413,8 @@ class VarDefinition implements RefTarget:
     is-block = false
     is-named = false
 
-class Call extends Expression:
-  target/Expression
-  method-name/string? := null
-  arguments/List  // Of Expression.
-
-  constructor .target .method-name=null --.arguments=[]:
-
-class Index extends Expression:
-  target/Expression
-  index/Expression
-
-  constructor .target .index:
-
-class Assign extends Expression:
-  target/RefTarget
-  value/Expression
-
-  constructor .target .value:
-
-class Block extends Expression:
-  parameters/List  // Of VarDefinition.
-  body/Statement
-
-  constructor .body --.parameters=[]:
-
-class Lambda extends Expression:
-  parameters/List  // Of VarDefinition.
-  body/Statement
-
-  constructor .body --.parameters=[]:
-
-class Literal extends Expression:
-  value/any
-
-  constructor .value:
-
-class LateInitialized extends Expression:
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-VarDefinition this
 
 /**
 A Toit statement.
@@ -214,20 +424,29 @@ Strictly speaking, Toit doesn't have the distinction between
 In practice, however, some constructs clearly are only used in
   statement-like positions.
 */
-abstract class Statement:
+abstract class Statement implements Node:
   constructor expr/Expression:
     return ExpressionStatement expr
 
   constructor:
 
+  abstract accept visitor/NodeVisitor -> any
+
 class Sequence extends Statement:
   statements/List ::= []  // Of Statement.
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Sequence this
 
   add statement/Statement -> none:
     statements.add statement
 
-  define preferred-name/string --type/RefTarget?=null initial/Expression -> VarDefinition:
-    definition := VarDefinition.local preferred-name --initial=initial --type=type
+  define preferred-name/string -> VarDefinition
+      --type/Ref?=null
+      initial/Expression:
+    definition := VarDefinition.local preferred-name
+        --initial=initial
+        --type=type
     add (LocalDefinition definition)
     return definition
 
@@ -263,17 +482,149 @@ class If extends Statement:
 
   constructor .condition .then-branch .else-branch=null:
 
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-If this
+
 class Return extends Statement:
   value/Expression? := null
 
   constructor .value=null:
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Return this
 
 class ExpressionStatement extends Statement:
   expression/Expression
 
   constructor .expression:
 
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-ExpressionStatement this
+
 class LocalDefinition extends Statement:
   definition/VarDefinition
 
   constructor .definition:
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-LocalDefinition this
+
+
+abstract class Expression implements Node:
+  abstract accept visitor/NodeVisitor -> any
+
+class Call extends Expression:
+  target/Expression
+  method-name/string? := null
+  arguments/List  // Of Expression.
+
+  constructor .target .method-name=null --.arguments=[]:
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Call this
+
+class Index extends Expression:
+  target/Expression
+  index/Expression
+
+  constructor .target .index:
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Index this
+
+class Assign extends Expression:
+  target/RefTarget
+  value/Expression
+
+  constructor .target .value:
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Assign this
+
+class Block extends Expression:
+  parameters/List  // Of VarDefinition.
+  body/Statement
+
+  constructor .body --.parameters=[]:
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Block this
+
+class Lambda extends Expression:
+  parameters/List  // Of VarDefinition.
+  body/Statement
+
+  constructor .body --.parameters=[]:
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Lambda this
+
+class Literal extends Expression:
+  value/any
+
+  constructor .value:
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Literal this
+
+class LateInitialized extends Expression:
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-LateInitialized this
+
+interface RefTarget:
+  name -> string?
+
+class Ref extends Expression:
+  target/RefTarget
+
+  constructor .target:
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Ref this
+
+class ImportedRef extends Ref:
+  imp/Import
+
+  constructor .imp target/RefTarget:
+    super target
+    imp.refs.add this
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-ImportedRef this
+
+class As extends Expression:
+  expression/Expression
+  type/RefTarget
+
+  constructor .expression .type:
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-As this
+
+class Is extends Expression:
+  expression/Expression
+  type/RefTarget
+
+  constructor .expression .type:
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Is this
+
+class Binary extends Expression:
+  left/Expression
+  op/string
+  right/Expression
+
+  constructor .left .op .right:
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Binary this
+
+class Named extends Expression:
+  parameter/VarDefinition
+  value/Expression
+
+  constructor .parameter .value:
+
+  accept visitor/NodeVisitor -> any:
+    return visitor.visit-Named this

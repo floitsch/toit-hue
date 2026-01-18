@@ -10,24 +10,74 @@ COMMON-ABBREVIATIONS_ := {
   "API",
 }
 
-unique name/string [--is-reserved]:
-  if not is-reserved.call name:
-    return name
+RESERVED_ ::= {
+  "constructor",
+  "if",
+  "it",
+  "for",
+  "while",
+  "class",
+  "static",
+  "extends",
+  "implements",
+  "mixin",
+  "switch",
+  "catch",
+  "try",
+  "not",
+  "and",
+  "or",
+  "return",
+  "none",
+  "any",
+  "true",
+  "false",
+  "_",
+}
+
+unique name/string [--is-free]:
+  if is-free.call name: return name
   i := 1
-  while is-reserved.call "$name-$i":
+  is-private := name.ends-with "_"
+  prefix := is-private ? name[.. name.size - 1] : name
+  suffix := is-private ? "_" : ""
+  while true:
+    attempt := "$prefix-$i$suffix"
+    if is-free.call attempt: return attempt
     i++
-  return "$name-$i"
 
-toit-class-name name/string -> string:
-  return to-caml-case (toit-identifier name)
+toit-class-name name/string --private/bool=false -> string:
+  result := to-caml-case (toit-identifier name --private=private)
+  first-char := result[..1]
+  upper := first-char.to-ascii-upper
+  if first-char != upper: result = upper + result[1..]
+  return result
 
-toit-member-name name/string -> string:
-  return to-kebab-case (toit-identifier name)
+toit-global-name name/string --private/bool=false -> string:
+  return toit-kebab-name_ name --private=private
 
-toit-local-name name/string -> string:
-  return to-kebab-case (toit-identifier name)
+toit-prefix-name name/string --private/bool=false -> string:
+  return toit-kebab-name_ name --private=private
 
-toit-identifier str/string -> string:
+toit-member-name name/string --private/bool=false -> string:
+  return toit-kebab-name_ name --private=private
+
+toit-local-name name/string --private/bool=false -> string:
+  return toit-kebab-name_ name --private=private
+
+toit-constant-name name/string --private/bool=false -> string:
+  result := to-caml-case (toit-identifier name --private=private)
+  result = result.to-ascii-upper
+  return result
+
+toit-kebab-name_ name/string --private/bool=false -> string:
+  result := to-kebab-case (toit-identifier name --private=private)
+  first-char := result[..1]
+  lower := first-char.to-ascii-lower
+  if first-char != lower: result = lower + result[1..]
+  return result
+
+toit-identifier str/string --private/bool=false -> string:
   chars := []
   str.do --runes: | rune/int |
     if 0 <= rune <= 9:
@@ -52,6 +102,7 @@ toit-identifier str/string -> string:
       last-was-dash = true
     chars[to++] = c
   chars.resize to
+  if private: chars.add '_'
   return string.from-runes chars
 
 to-kebab-case id/string -> string:
@@ -89,7 +140,7 @@ split-into-chunks_ str/string -> List:
         // Might need to be tweaked a bit more...
         result.add str[start .. i]
         start = i
-    else if c == '_' or c == '-' or c == ' ':
+    else if (c == '_' and i != str.size - 1)or c == '-' or c == ' ':
       is-upper = false
       if start != i: result.add str[start .. i]
       start = i + 1
@@ -100,3 +151,67 @@ split-into-chunks_ str/string -> List:
     last-was-upper = is-upper
   if start != str.size: result.add str[start..]
   return result
+
+abstract class Namer:
+  used-names/Set ::= {}
+  outer-namer/Namer?
+
+  constructor --outer/Namer?=null:
+    outer-namer = outer
+
+  reserve name/string --check/bool=true -> none:
+    assert: not check or not used-names.contains name
+    used-names.add name
+
+  use-unique name/string -> string:
+    unique-name := unique name --is-free=: is-free it
+    used-names.add unique-name
+    return unique-name
+
+  is-free name/string -> bool:
+    namer/Namer? := this
+    if RESERVED_.contains name: return false
+    while namer:
+      if namer.used-names.contains name: return false
+      namer = namer.outer-namer
+    return true
+
+class GlobalNamer extends Namer:
+
+  use-class preferred/string --private/bool=false -> string:
+    return use-unique (toit-class-name preferred --private=private)
+
+  use-global preferred/string --private/bool=false -> string:
+    return use-unique (toit-global-name preferred --private=private)
+
+  use-constant preferred/string --private/bool=false -> string:
+    return use-unique (toit-constant-name preferred --private=private)
+
+  use-prefix preferred/string --private/bool=false -> string:
+    return use-unique (toit-prefix-name preferred --private=private)
+
+  new-member-namer -> MemberNamer:
+    return MemberNamer this
+
+  new-local-namer -> LocalNamer:
+    return LocalNamer this
+
+class MemberNamer extends Namer:
+  constructor global-namer/GlobalNamer:
+    super --outer=global-namer
+
+  use-member preferred/string --private/bool=false -> string:
+    return use-unique (toit-member-name preferred --private=private)
+
+  use-constant preferred/string --private/bool=false -> string:
+    return use-unique (toit-constant-name preferred --private=private)
+
+  new-local-namer -> LocalNamer:
+    return LocalNamer this
+
+class LocalNamer extends Namer:
+  constructor outer/Namer:
+    super --outer=outer
+
+  use-local preferred/string -> string:
+    return use-unique (toit-local-name preferred)
