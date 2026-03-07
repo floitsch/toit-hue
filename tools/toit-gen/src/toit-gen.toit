@@ -11,7 +11,7 @@ import io
 import host.directory
 import host.file
 
-import .namer
+import .namer show GlobalNamer MemberNamer LocalNamer Namer
 
 class WriteContext_:
   indent-level/int := 0
@@ -184,26 +184,206 @@ class TraversingVisitor implements NodeVisitor:
     node.value.accept this
     return null
 
-class NamingVisitor extends TraversingVisitor:
-  visit-Program node/Program -> none:
+class FixedNamingVisitor extends TraversingVisitor:
+  namers/Map
+  current-namer/Namer? := null
+
+  constructor .namers:
+
+  visit-Program node/Program -> any:
     node.libraries.do: | library/Library |
-      null
+      global-namer := namers.get library --init=: GlobalNamer
+      current-namer = global-namer
+      library.accept this
+      current-namer = null
+    return null
 
-  visit-Import node/Import:
-    if node.preferred-prefix:
-      node.preferred-prefix = toit-prefix-name node.preferred-prefix
+  visit-Class node/Class -> any:
+    old := current-namer
+    if node.name: (old as GlobalNamer).reserve node.name
+    member-namer := namers.get node --init=: (old as GlobalNamer).new-member-namer
+    current-namer = member-namer
     super node
+    current-namer = old
+    return null
+
+  visit-Function node/Function -> any:
+    old := current-namer
+    if node.name:
+      if old is MemberNamer: (old as MemberNamer).reserve node.name --deep=true
+      else if old is GlobalNamer: (old as GlobalNamer).reserve node.name
+    local-namer := namers.get node --init=:
+      old is MemberNamer ? (old as MemberNamer).new-local-namer : (old as GlobalNamer).new-local-namer
+    current-namer = local-namer
+    super node
+    current-namer = old
+    return null
+
+  visit-VarDefinition node/VarDefinition -> any:
+    if node.name:
+      if current-namer is LocalNamer:
+        (current-namer as LocalNamer).reserve node.name --deep=true
+      else if current-namer is MemberNamer:
+        (current-namer as MemberNamer).reserve node.name --deep=true
+      else if current-namer is GlobalNamer:
+        (current-namer as GlobalNamer).reserve node.name
+    super node
+    return null
+
+class PublicNamingVisitor extends TraversingVisitor:
+  namers/Map
+  current-namer/Namer? := null
+
+  constructor .namers:
+
+  visit-Program node/Program -> any:
+    node.libraries.do: | library/Library |
+      current-namer = namers[library]
+      library.accept this
+      current-namer = null
+    return null
+
+  visit-Class node/Class -> any:
+    old := current-namer
+    if not node.name: node.name = (old as GlobalNamer).use-class node.preferred-name
+    member-namer := namers[node]
+    current-namer = member-namer
+    super node
+    member-namer.used-names.do: | member-name/string |
+      if not (old as GlobalNamer).used-names.contains member-name:
+        (old as GlobalNamer).reserve member-name --deep=false --check=false
+    current-namer = old
+    return null
+
+  visit-Function node/Function -> any:
+    old := current-namer
+    if not node.name:
+      if old is MemberNamer:
+        node.name = (old as MemberNamer).use-member node.preferred-name --private=node.is-static
+      else if old is GlobalNamer:
+        node.name = (old as GlobalNamer).use-global node.preferred-name
+    current-namer = namers[node]
+    super node
+    current-namer = old
+    return null
+
+  visit-VarDefinition node/VarDefinition -> any:
+    if not node.name:
+      if current-namer is GlobalNamer:
+        node.name = (current-namer as GlobalNamer).use-global node.preferred-name
+      else if current-namer is MemberNamer:
+        node.name = (current-namer as MemberNamer).use-member node.preferred-name
+      else if current-namer is LocalNamer and node.is-named:
+        outer := (current-namer as LocalNamer).outer-namer
+        if outer is MemberNamer:
+          node.name = (outer as MemberNamer).use-member node.preferred-name
+        else if outer is GlobalNamer:
+          node.name = (outer as GlobalNamer).use-global node.preferred-name
+    super node
+    return null
+
+class UnnamedParamNamingVisitor extends TraversingVisitor:
+  namers/Map
+  current-namer/Namer? := null
+
+  constructor .namers:
+
+  visit-Program node/Program -> any:
+    node.libraries.do: | library/Library |
+      current-namer = namers[library]
+      library.accept this
+      current-namer = null
+    return null
+
+  visit-Class node/Class -> any:
+    old := current-namer
+    current-namer = namers[node]
+    super node
+    current-namer = old
+    return null
+
+  visit-Function node/Function -> any:
+    old := current-namer
+    current-namer = namers[node]
+    super node
+    current-namer = old
+    return null
+
+  visit-VarDefinition node/VarDefinition -> any:
+    if not node.name and current-namer is LocalNamer and not node.is-block and not node.initial and not node.is-named:
+      outer := (current-namer as LocalNamer).outer-namer
+      if outer is MemberNamer:
+        node.name = (outer as MemberNamer).use-member node.preferred-name
+      else if outer is GlobalNamer:
+        node.name = (outer as GlobalNamer).use-global node.preferred-name
+    super node
+    return null
+
+class RemainingNamingVisitor extends TraversingVisitor:
+  namers/Map
+  current-namer/Namer? := null
+
+  constructor .namers:
+
+  visit-Program node/Program -> any:
+    node.libraries.do: | library/Library |
+      current-namer = namers[library]
+      library.accept this
+      current-namer = null
+    return null
+
+  visit-Import node/Import -> any:
+    if node.preferred-prefix:
+      node.prefix = (current-namer as GlobalNamer).use-prefix node.preferred-prefix
+    super node
+    return null
+
+  visit-Class node/Class -> any:
+    old := current-namer
+    current-namer = namers[node]
+    super node
+    current-namer = old
+    return null
+
+  visit-Function node/Function -> any:
+    old := current-namer
+    current-namer = namers[node]
+    super node
+    current-namer = old
+    return null
+
+  visit-VarDefinition node/VarDefinition -> any:
+    if not node.name and current-namer is LocalNamer:
+      node.name = (current-namer as LocalNamer).use-local node.preferred-name
+    super node
+    return null
 
 
+next-hash-code_ := 0
 
 interface Node:
+  hash-code -> int
+  operator == other/any -> bool
   accept visitor/NodeVisitor -> any
 
-class Program implements Node:
+abstract class BaseNode_ implements Node:
+  hash-code/int ::= next-hash-code_++
+  abstract accept visitor/NodeVisitor -> any
+  operator == other/any -> bool:
+    return identical this other
+
+class Program extends BaseNode_:
   libraries/List ::= []
 
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Program this
+
+  assign-names_ -> none:
+    namers := {:}
+    this.accept (FixedNamingVisitor namers)
+    this.accept (PublicNamingVisitor namers)
+    this.accept (UnnamedParamNamingVisitor namers)
+    this.accept (RemainingNamingVisitor namers)
 
   gen -> none:
     assign-names_
@@ -230,7 +410,7 @@ class Program implements Node:
       result[library.path] = code
     return result
 
-class Library implements Node:
+class Library extends BaseNode_:
   path/string
   imports/List ::= []  // Of Import.
   exports/List ::= []  // Of Export.
@@ -263,7 +443,7 @@ class Library implements Node:
 
     // TODO(florian): implement rest.
 
-class Import implements Node:
+class Import extends BaseNode_:
   is-relative/bool
   segments/List  // Of string.
   preferred-prefix/string? := null
@@ -282,13 +462,13 @@ class Import implements Node:
   is-core -> bool:
     return segments.size == 1 and segments[0] == "core"
 
-class Export implements Node:
+class Export extends BaseNode_:
   exports/List ::= []  // Of Ref.
 
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Export this
 
-class Class implements RefTarget:
+class Class extends BaseNode_ implements RefTarget:
   static CLASS ::= 0
   static INTERFACE ::= 1
   static MIXIN ::= 2
@@ -319,7 +499,7 @@ class Class implements RefTarget:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Class this
 
-class Function:
+class Function extends BaseNode_:
   preferred-name/string
   name/string? := null
   parameters/List ::= []  // Of VarDefinition.
@@ -359,7 +539,7 @@ class Operator extends Function:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Operator this
 
-class VarDefinition implements RefTarget Node:
+class VarDefinition extends BaseNode_ implements RefTarget:
   preferred-name/string
   name/string? := null
   type/Ref?
@@ -424,7 +604,7 @@ Strictly speaking, Toit doesn't have the distinction between
 In practice, however, some constructs clearly are only used in
   statement-like positions.
 */
-abstract class Statement implements Node:
+abstract class Statement extends BaseNode_:
   constructor expr/Expression:
     return ExpressionStatement expr
 
@@ -510,7 +690,7 @@ class LocalDefinition extends Statement:
     return visitor.visit-LocalDefinition this
 
 
-abstract class Expression implements Node:
+abstract class Expression extends BaseNode_:
   abstract accept visitor/NodeVisitor -> any
 
 class Call extends Expression:

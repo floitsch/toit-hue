@@ -159,9 +159,11 @@ abstract class Namer:
   constructor --outer/Namer?=null:
     outer-namer = outer
 
-  reserve name/string --check/bool=true -> none:
+  reserve name/string --check/bool=true --deep/bool=false -> none:
     assert: not check or not used-names.contains name
     used-names.add name
+    if deep and outer-namer:
+      outer-namer.reserve name --check=false --deep=true
 
   use-unique name/string -> string:
     unique-name := unique name --is-free=: is-free it
