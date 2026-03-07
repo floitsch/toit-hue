@@ -16,8 +16,12 @@ import .namer show GlobalNamer MemberNamer LocalNamer Namer
 class WriteContext_:
   indent-level/int := 0
   writer/io.Writer
+  is-new-line_/bool := true
 
-  constructor .writer/io.Writer:
+  constructor .writer:
+
+  indent-string -> string:
+    return "  " * indent-level
 
   indent -> none:
     indent-level += 1
@@ -27,10 +31,16 @@ class WriteContext_:
     if indent-level < 0:
       throw "INVALID_STATE"
 
-  write-line line/string -> none:
-    writer.write "  " * indent-level
-    writer.write line
+  write str/string -> none:
+    if is-new-line_ and str != "":
+      writer.write indent-string
+      is-new-line_ = false
+    writer.write str
+
+  write-line line/string="" -> none:
+    write line
     writer.write "\n"
+    is-new-line_ = true
 
 interface NodeVisitor:
   visit-Program node/Program -> any
@@ -359,6 +369,340 @@ class RemainingNamingVisitor extends TraversingVisitor:
     return null
 
 
+class GeneratingVisitor implements NodeVisitor:
+  context/WriteContext_
+  omit-trailing-newline_/bool := false
+
+  constructor .context:
+
+  needs-parens_ node/Expression -> bool:
+    if node is Call:
+      c := node as Call
+      if not c.arguments.is-empty: return true
+      if c.target is Ref:
+        target-def := (c.target as Ref).target
+        if target-def is Class: return true
+        if target-def is Function and (target-def as Function).is-constructor: return true
+      return false
+    if node is Binary: return true
+    if node is As: return true
+    if node is Is: return true
+    return false
+
+  expr_ node/Expression -> none:
+    node.accept this
+
+  visit-Program node/Program -> any:
+    unreachable
+
+  visit-Operator node/Function -> any:
+    return visit-Function node
+
+  visit-Library node/Library -> any:
+    node.imports.do: | imp | if not imp.refs.is-empty: imp.accept this
+    if not node.imports.is-empty: context.write-line ""
+    node.exports.do: | exp | exp.accept this
+    if not node.exports.is-empty: context.write-line ""
+    node.globals.do: | glob | glob.accept this
+    node.classes.do: | cls | cls.accept this
+    node.functions.do: | fun | fun.accept this
+    return null
+
+  visit-Import node/Import -> any:
+    line := "import "
+    if node.is-relative: line += "."
+    line += node.segments.join "."
+    if node.prefix:
+      line += " as $(node.prefix)"
+
+    if node.show-all:
+      line += " show *"
+    else if not node.refs.is-empty:
+      line += " show "
+      ref-names := node.refs.map: | ref/ImportedRef | ref.target.name
+      line += ref-names.join " "
+    context.write-line line
+    return null
+
+  visit-Export node/Export -> any:
+    line := "export "
+    ref-names := node.exports.map: | ref/Ref | ref.target.name
+    line += ref-names.join " "
+    context.write-line line
+    return null
+
+  visit-Class node/Class -> any:
+    line := ""
+    if node.is-abstract: line += "abstract "
+    if node.kind == Class.INTERFACE: line += "interface"
+    else if node.kind == Class.MIXIN: line += "mixin"
+    else: line += "class"
+    line += " $node.name"
+    if node.super-class:
+      line += " extends $(node.super-class.target.name)"
+    line += ":"
+    context.write-line line
+    context.indent
+
+    node.fields.do: | field/VarDefinition |
+      context.write field.name
+      if field.type:
+        context.write "/$(field.type.target.name)"
+        if field.initial:
+          if field.is-final: context.write " ::= "
+          else: context.write " := "
+          expr_ field.initial
+        else:
+          if not field.is-final: context.write " := ?"
+      else:
+        if field.initial:
+          if field.is-final: context.write " ::= "
+          else: context.write " := "
+          expr_ field.initial
+        else:
+          if not field.is-final: context.write " := ?"
+          else: context.write " ::= ?"
+      context.write-line ""
+
+    node.members.do: | member/Function |
+      if member.name == "constructor": context.write-line ""
+      member.accept this
+
+    context.dedent
+    context.write-line ""
+    return null
+
+  visit-Function node/Function -> any:
+    line := "$node.name"
+    node.parameters.do: | param/VarDefinition |
+      param-str := param.name
+      if param.is-named: param-str = "--$param-str"
+      line += " $param-str"
+
+    if node.name != "constructor":
+      if node.return-type:
+        line += " -> $(node.return-type.target.name)"
+
+    line += ":"
+
+    context.write-line line
+    if node.body:
+      context.indent
+      node.body.accept this
+      context.dedent
+    context.write-line ""
+    return null
+
+  visit-VarDefinition node/VarDefinition -> any:
+    return null
+
+  visit-Sequence node/Sequence -> any:
+    old-omit := omit-trailing-newline_
+    for i := 0; i < node.statements.size; i++:
+      omit-trailing-newline_ = old-omit and i == node.statements.size - 1
+      node.statements[i].accept this
+    omit-trailing-newline_ = old-omit
+    return null
+
+  visit-If node/If -> any:
+    context.write "if "
+    // We use `write-arg_` to get parenthesis around the condition if it
+    // isn't simple. This is over-conservative but handles the case where
+    // the condition is a call with a block argument.
+    write-arg_ node.condition
+    context.write-line ":"
+    context.indent
+    node.then-branch.accept this
+    context.dedent
+    if node.else-branch:
+      context.write-line "else:"
+      context.indent
+      node.else-branch.accept this
+      context.dedent
+    return null
+
+  visit-Return node/Return -> any:
+    if node.value:
+      context.write "return "
+      expr_ node.value
+    else:
+      context.write "return"
+    if not omit-trailing-newline_ and not context.is-new-line_: context.write-line ""
+    return null
+
+  visit-ExpressionStatement node/ExpressionStatement -> any:
+    expr_ node.expression
+    if not omit-trailing-newline_ and not context.is-new-line_: context.write-line ""
+    return null
+
+  visit-LocalDefinition node/LocalDefinition -> any:
+    def := node.definition
+    context.write "$def.name := "
+    expr_ def.initial
+    if not omit-trailing-newline_ and not context.is-new-line_: context.write-line ""
+    return null
+
+  visit-Call node/Call -> any:
+    target-parens := needs-parens_ node.target
+    if node.method-name and (node.target is Call and not (node.target as Call).method-name and (node.target as Call).arguments.is-empty):
+      target-parens = true
+
+    if target-parens: context.write "("
+    expr_ node.target
+    if target-parens: context.write ")"
+    if node.method-name: context.write ".$(node.method-name)"
+
+    if node.arguments.is-empty: return null
+
+    blocks := []
+    normal-args := []
+    node.arguments.do: | arg |
+      if arg is Block: blocks.add arg
+      else if arg is Named and (arg as Named).value is Block: blocks.add arg
+      else: normal-args.add arg
+
+    multi-block := blocks.size > 1
+    if not normal-args.is-empty:
+      if multi-block:
+        // In multi-block mode, put all args on continuation lines.
+        normal-args.do: | arg |
+          context.write "\n$(context.indent-string)    "
+          write-arg_ arg
+      else:
+        has-named := normal-args.any: it is Named
+        if normal-args.size > 2 and has-named:
+          context.write " "
+          write-arg_ normal-args[0]
+          for i := 1; i < normal-args.size; i++:
+            context.write "\n$(context.indent-string)    "
+            write-arg_ normal-args[i]
+        else:
+          normal-args.do: | arg |
+            context.write " "
+            write-arg_ arg
+
+    for i := 0; i < blocks.size; i++:
+      blk := blocks[i]
+      if multi-block:
+        // Each block on its own line, indented by 4 from the call.
+        context.write "\n$(context.indent-string)    "
+      if blk is Named:
+        n-blk := blk as Named
+        if multi-block or i > 0:
+          context.write "--$(n-blk.parameter.name)="
+        else:
+          context.write " --$(n-blk.parameter.name)="
+        blk = n-blk.value
+
+      b := blk as Block
+      context.write ":"
+      if not b.parameters.is-empty:
+        p-names := b.parameters.map: it.name
+        context.write " | $(p-names.join " ") |"
+
+      if multi-block:
+        // Body at +4 from block header. Always omit trailing newline
+        // to prevent blank lines between blocks.
+        context.indent-level += 2
+        stream-block-body_ b.body true
+        context.indent-level -= 2
+      else:
+        is-last := i == blocks.size - 1
+        stream-block-body_ b.body is-last
+
+    return null
+
+  visit-Index node/Index -> any:
+    if needs-parens_ node.target: context.write "("
+    expr_ node.target
+    if needs-parens_ node.target: context.write ")"
+    context.write "["
+    expr_ node.index
+    context.write "]"
+    return null
+
+  visit-Assign node/Assign -> any:
+    context.write "$node.target.name = "
+    expr_ node.value
+    return null
+
+  visit-Block node/Block -> any:
+    unreachable
+
+  visit-Lambda node/Lambda -> any:
+    context.write "::"
+    if not node.parameters.is-empty:
+      p-names := node.parameters.map: it.name
+      context.write " | $(p-names.join " ") |"
+
+    stream-block-body_ node.body true
+    return null
+
+  visit-Literal node/Literal -> any:
+    v := node.value
+    if v is string: context.write "\"$v\""
+    else if v is int or v is float or v is bool: context.write "$v"
+    else if v == null: context.write "null"
+    else if v is List and v.is-empty: context.write "[]"
+    else if v is Map and v.is-empty: context.write "{:}"
+    else: unreachable
+    return null
+
+  visit-LateInitialized node/LateInitialized -> any:
+    context.write "?"
+    return null
+
+  visit-Ref node/Ref -> any:
+    context.write node.target.name
+    return null
+
+  visit-ImportedRef node/ImportedRef -> any:
+    if node.imp.prefix: context.write "$node.imp.prefix.$node.target.name"
+    else: context.write node.target.name
+    return null
+
+  visit-As node/As -> any:
+    if needs-parens_ node.expression: context.write "("
+    expr_ node.expression
+    if needs-parens_ node.expression: context.write ")"
+    context.write " as $node.type.name"
+    return null
+
+  visit-Is node/Is -> any:
+    if needs-parens_ node.expression: context.write "("
+    expr_ node.expression
+    if needs-parens_ node.expression: context.write ")"
+    context.write " is $node.type.name"
+    return null
+
+  visit-Binary node/Binary -> any:
+    write-arg_ node.left
+    context.write " $node.op "
+    write-arg_ node.right
+    return null
+
+  visit-Named node/Named -> any:
+    context.write "--$node.parameter.name="
+    expr_ node.value
+    return null
+
+  write-arg_ arg/Expression -> none:
+    if needs-parens_ arg:
+      context.write "("
+      expr_ arg
+      context.write ")"
+    else:
+      expr_ arg
+
+  stream-block-body_ body/Statement omit/bool -> none:
+    context.write-line ""
+    context.indent
+    old-omit := omit-trailing-newline_
+    omit-trailing-newline_ = omit
+    body.accept this
+    omit-trailing-newline_ = old-omit
+    context.dedent
+
 next-hash-code_ := 0
 
 interface Node:
@@ -425,23 +769,8 @@ class Library extends BaseNode_:
     return visitor.visit-Library this
 
   gen_ context/WriteContext_ -> none:
-    imports.do: | imp/Import |
-      if imp.refs.is-empty: continue.do
-      line := "import "
-      if imp.is-relative:
-        line += "."
-      line += imp.segments.join "."
-      if imp.show-all:
-        line += " show *"
-      else if imp.prefix:
-        line += " as $imp.prefix"
-      else:
-        line += " show "
-        ref-names := imp.refs.map: | ref/Ref | ref.target.name
-        line += ref-names.join " "
-      context.write-line line
-
-    // TODO(florian): implement rest.
+    visitor := GeneratingVisitor context
+    visitor.visit-Library this
 
 class Import extends BaseNode_:
   is-relative/bool
@@ -499,7 +828,7 @@ class Class extends BaseNode_ implements RefTarget:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Class this
 
-class Function extends BaseNode_:
+class Function extends BaseNode_ implements RefTarget:
   preferred-name/string
   name/string? := null
   parameters/List ::= []  // Of VarDefinition.
@@ -507,6 +836,7 @@ class Function extends BaseNode_:
   body/Statement? := null
   is-abstract/bool
   is-static/bool
+  is-constructor/bool := false
 
   constructor .preferred-name
       --.parameters
@@ -515,12 +845,16 @@ class Function extends BaseNode_:
       --.is-static=false
       .body=null:
 
-  constructor.constr --.parameters .body=null:
-    preferred-name = "constructor"
-    name = "constructor"
+  constructor.constr --.parameters --name/string?=null .body=null:
+    if not name:
+      preferred-name = "constructor"
+      this.name = "constructor"
+    else:
+      preferred-name = name
     is-abstract = false
     is-static = false
     return-type = null
+    is-constructor = true
 
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Function this
