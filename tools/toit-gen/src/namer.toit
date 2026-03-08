@@ -35,6 +35,9 @@ RESERVED_ ::= {
   "_",
 }
 
+/**
+Creates a unique string from $name in the given scope.
+*/
 unique name/string [--is-free]:
   if is-free.call name: return name
   i := 1
@@ -46,6 +49,7 @@ unique name/string [--is-free]:
     if is-free.call attempt: return attempt
     i++
 
+/** Converts a name to a valid Toit class name (CamelCase). */
 toit-class-name name/string --private/bool=false -> string:
   result := to-caml-case (toit-identifier name --private=private)
   first-char := result[..1]
@@ -53,18 +57,23 @@ toit-class-name name/string --private/bool=false -> string:
   if first-char != upper: result = upper + result[1..]
   return result
 
+/** Converts a name to a valid Toit global name (kebab-case). */
 toit-global-name name/string --private/bool=false -> string:
   return toit-kebab-name_ name --private=private
 
+/** Converts a name to a valid Toit prefix name (kebab-case). */
 toit-prefix-name name/string --private/bool=false -> string:
   return toit-kebab-name_ name --private=private
 
+/** Converts a name to a valid Toit member name (kebab-case). */
 toit-member-name name/string --private/bool=false -> string:
   return toit-kebab-name_ name --private=private
 
+/** Converts a name to a valid Toit local variable name (kebab-case). */
 toit-local-name name/string --private/bool=false -> string:
   return toit-kebab-name_ name --private=private
 
+/** Converts a name to a valid Toit constant name (ALL_CAPS). */
 toit-constant-name name/string --private/bool=false -> string:
   result := to-caml-case (toit-identifier name --private=private)
   result = result.to-ascii-upper
@@ -77,6 +86,9 @@ toit-kebab-name_ name/string --private/bool=false -> string:
   if first-char != lower: result = lower + result[1..]
   return result
 
+/**
+Converts a string to a valid Toit identifier.
+*/
 toit-identifier str/string --private/bool=false -> string:
   chars := []
   str.do --runes: | rune/int |
@@ -165,6 +177,9 @@ normalize_ name/string -> string:
   normalized := core.replace --all "_" "-"
   return is-private ? "$(normalized)_" : normalized
 
+/**
+Base class for assigning and reserving names.
+*/
 abstract class Namer:
   used-names/Set ::= {}
   outer-namer/Namer?
@@ -172,6 +187,9 @@ abstract class Namer:
   constructor --outer/Namer?=null:
     outer-namer = outer
 
+  /**
+  Reserves a specific $name.
+  */
   reserve name/string --check/bool=true --deep/bool=false -> none:
     normalized := normalize_ name
     assert: not check or not used-names.contains normalized
@@ -179,11 +197,15 @@ abstract class Namer:
     if deep and outer-namer:
       outer-namer.reserve normalized --check=false --deep=true
 
+  /**
+  Registers a unique variant of the given $name and returns it.
+  */
   use-unique name/string -> string:
     unique-name := unique name --is-free=: is-free it
     used-names.add unique-name
     return unique-name
 
+  /** Returns true if $name is available. */
   is-free name/string -> bool:
     normalized := normalize_ name
     namer/Namer? := this
@@ -193,17 +215,23 @@ abstract class Namer:
       namer = namer.outer-namer
     return true
 
+/**
+A namer for the global scope.
+*/
 class GlobalNamer extends Namer:
 
+  /** Derives and registers a valid unique class name. */
   use-class preferred/string --private/bool=false -> string:
     return use-unique (toit-class-name preferred --private=private)
 
+  /** Derives and registers a valid unique global variable name. */
   use-global preferred/string --private/bool=false -> string:
     return use-unique (toit-global-name preferred --private=private)
 
   use-constant preferred/string --private/bool=false -> string:
     return use-unique (toit-constant-name preferred --private=private)
 
+  /** Derives and registers a valid unique import prefix name. */
   use-prefix preferred/string --private/bool=false --also-avoid/Set={} -> string:
     name := toit-prefix-name preferred --private=private
     if also-avoid.is-empty:
@@ -233,10 +261,14 @@ class GlobalNamer extends Namer:
   new-local-namer -> LocalNamer:
     return LocalNamer this
 
+/**
+A namer for a class or interface member scope.
+*/
 class MemberNamer extends Namer:
   constructor global-namer/GlobalNamer:
     super --outer=global-namer
 
+  /** Derives and registers a valid unique method or field name. */
   use-member preferred/string --private/bool=false -> string:
     return use-unique (toit-member-name preferred --private=private)
 
@@ -261,9 +293,13 @@ class MemberNamer extends Namer:
   new-local-namer -> LocalNamer:
     return LocalNamer this
 
+/**
+A namer for a local scope (e.g. inside a function).
+*/
 class LocalNamer extends Namer:
   constructor outer/Namer:
     super --outer=outer
 
+  /** Derives and registers a valid unique local variable name. */
   use-local preferred/string -> string:
     return use-unique (toit-local-name preferred)

@@ -4,6 +4,16 @@
 
 /**
 Library to create Toit code.
+
+It provides an Object-Oriented AST (Abstract Syntax Tree) to build Toit
+programs programmatically, managing names properly to prevent collisions, 
+and ultimately writing the generated code to files or returning it as strings.
+
+A $Program contains one or multiple $Library instances. Variables, functions, 
+classes, and parameters are defined as $RefTarget instances. Code relies on
+$Expression and $Statement subclasses to build logic blocks.
+
+See the `examples` directory for examples.
 */
 
 import fs
@@ -28,20 +38,32 @@ abstract class BaseNode_ implements Node:
   operator == other/any -> bool:
     return identical this other
 
+/**
+A reference to a named element for use within Toitdocs.
+*/
 class ToitdocNameRef:
   holder/RefTarget?
   target/RefTarget
 
   constructor .target --.holder=null:
 
+/**
+A reference to a specific function or method with matching parameters for use within Toitdocs.
+*/
 class ToitdocExactRef:
   holder/RefTarget?
   target/Function
 
   constructor .target --.holder=null:
 
+/**
+A reference to the superclass for use within Toitdocs.
+*/
 class ToitdocSuperRef:
 
+/**
+A full Toit program.
+*/
 class Program extends BaseNode_:
   libraries/List ::= []
 
@@ -127,6 +149,9 @@ class Program extends BaseNode_:
               --also-avoid=all-names
     this.accept (LocalNamingVisitor namers)
 
+  /**
+  Generates the Toit code for the program and saves it to the file system.
+  */
   gen -> none:
     assign-names_
     libraries.do: | library/Library |
@@ -141,6 +166,9 @@ class Program extends BaseNode_:
       library.gen_ context
       stream.close
 
+  /**
+  Generates the Toit code for the program and returns it as a map from path to content.
+  */
   gen --in-memory/True -> Map:
     assign-names_
     result := {:}
@@ -154,6 +182,9 @@ class Program extends BaseNode_:
 
 
 
+/**
+A Toit library.
+*/
 class Library extends BaseNode_:
   path/string
   imports/List ::= []  // Of Import.
@@ -173,6 +204,9 @@ class Library extends BaseNode_:
     visitor := GeneratingVisitor context
     visitor.visit-Library this
 
+/**
+An import declaration.
+*/
 class Import extends BaseNode_:
   is-relative/bool
   segments/List  // Of string.
@@ -192,12 +226,18 @@ class Import extends BaseNode_:
   is-core -> bool:
     return segments.size == 1 and segments[0] == "core"
 
+/**
+An export declaration.
+*/
 class Export extends BaseNode_:
   exports/List ::= []  // Of Ref.
 
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Export this
 
+/**
+A Toit class, interface or mixin declaration.
+*/
 class Class extends BaseNode_ implements RefTarget:
   static CLASS ::= 0
   static INTERFACE ::= 1
@@ -230,6 +270,9 @@ class Class extends BaseNode_ implements RefTarget:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Class this
 
+/**
+A Toit function or method.
+*/
 class Function extends BaseNode_ implements RefTarget:
   preferred-name/string
   name/string? := null
@@ -262,6 +305,9 @@ class Function extends BaseNode_ implements RefTarget:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Function this
 
+/**
+A Toit operator.
+*/
 class Operator extends Function:
   operator-string/string
 
@@ -276,6 +322,9 @@ class Operator extends Function:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Operator this
 
+/**
+A variable, parameter or field definition.
+*/
 class VarDefinition extends BaseNode_ implements RefTarget:
   preferred-name/string
   name/string? := null
@@ -350,6 +399,9 @@ abstract class Statement extends BaseNode_:
 
   abstract accept visitor/NodeVisitor -> any
 
+/**
+A sequence of statements.
+*/
 class Sequence extends Statement:
   statements/List ::= []  // Of Statement.
 
@@ -359,6 +411,9 @@ class Sequence extends Statement:
   add statement/Statement -> none:
     statements.add statement
 
+  /**
+  Defines a new local variable.
+  */
   define preferred-name/string -> VarDefinition
       --type/Ref?=null
       initial/Expression:
@@ -368,31 +423,41 @@ class Sequence extends Statement:
     add (LocalDefinition definition)
     return definition
 
+  /** Calls $target. */
   call target/Expression -> none:
     call target --arguments=[]
 
+  /** Calls $target with one argument. */
   call target/Expression arg0/Expression -> none:
     call target --arguments=[arg0]
 
+  /** Calls $target with two arguments. */
   call target/Expression arg0/Expression arg1/Expression -> none:
     call target --arguments=[arg0, arg1]
 
+  /** Calls $target with multiple $arguments. */
   call target/Expression --arguments/List -> none:
     expr := Call target --arguments=arguments
     add (Statement expr)
 
+  /** Adds an if statement. */
   iff condition/Expression then-branch/Statement else-branch/Statement?=null -> none:
     if-statement := If condition then-branch else-branch
     add if-statement
 
+  /** Adds a return statement. */
   ret value/Expression?=null -> none:
     return-statement := Return value
     add return-statement
 
+  /** Adds an assignment statement. */
   assign target/RefTarget value/Expression -> none:
     assign := Assign target value
     add (Statement assign)
 
+/**
+An if statement.
+*/
 class If extends Statement:
   condition/Expression
   then-branch/Statement
@@ -403,6 +468,9 @@ class If extends Statement:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-If this
 
+/**
+A return statement.
+*/
 class Return extends Statement:
   value/Expression? := null
 
@@ -411,6 +479,9 @@ class Return extends Statement:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Return this
 
+/**
+A statement that merely evaluates an expression (and discards its result).
+*/
 class ExpressionStatement extends Statement:
   expression/Expression
 
@@ -419,6 +490,9 @@ class ExpressionStatement extends Statement:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-ExpressionStatement this
 
+/**
+A statement that defines a local variable.
+*/
 class LocalDefinition extends Statement:
   definition/VarDefinition
 
@@ -428,9 +502,15 @@ class LocalDefinition extends Statement:
     return visitor.visit-LocalDefinition this
 
 
+/**
+A Toit expression.
+*/
 abstract class Expression extends BaseNode_:
   abstract accept visitor/NodeVisitor -> any
 
+/**
+A function or method call.
+*/
 class Call extends Expression:
   target/Expression
   method-name/string? := null
@@ -441,6 +521,9 @@ class Call extends Expression:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Call this
 
+/**
+An index operation (e.g. `foo[bar]`).
+*/
 class Index extends Expression:
   target/Expression
   index/Expression
@@ -450,6 +533,9 @@ class Index extends Expression:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Index this
 
+/**
+An assignment expression (e.g. `foo = bar`).
+*/
 class Assign extends Expression:
   target/RefTarget
   value/Expression
@@ -459,6 +545,9 @@ class Assign extends Expression:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Assign this
 
+/**
+A block expression.
+*/
 class Block extends Expression:
   parameters/List  // Of VarDefinition.
   body/Statement
@@ -468,6 +557,9 @@ class Block extends Expression:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Block this
 
+/**
+A lambda expression.
+*/
 class Lambda extends Expression:
   parameters/List  // Of VarDefinition.
   body/Statement
@@ -477,6 +569,9 @@ class Lambda extends Expression:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Lambda this
 
+/**
+A literal value (string, int, float, bool, null, empty List or empty Map).
+*/
 class Literal extends Expression:
   value/any
 
@@ -485,13 +580,22 @@ class Literal extends Expression:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Literal this
 
+/**
+A late initialization marker `?`.
+*/
 class LateInitialized extends Expression:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-LateInitialized this
 
+/**
+A reference target, like a class, function, or variable.
+*/
 interface RefTarget:
   name -> string?
 
+/**
+A reference to a $RefTarget.
+*/
 class Ref extends Expression:
   target/RefTarget
 
@@ -500,6 +604,9 @@ class Ref extends Expression:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Ref this
 
+/**
+A reference to an imported target.
+*/
 class ImportedRef extends Ref:
   imp/Import
 
@@ -510,6 +617,9 @@ class ImportedRef extends Ref:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-ImportedRef this
 
+/**
+An `as` typecast expression.
+*/
 class As extends Expression:
   expression/Expression
   type/RefTarget
@@ -519,6 +629,9 @@ class As extends Expression:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-As this
 
+/**
+An `is` type check expression.
+*/
 class Is extends Expression:
   expression/Expression
   type/RefTarget
@@ -528,6 +641,9 @@ class Is extends Expression:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Is this
 
+/**
+A binary operator expression.
+*/
 class Binary extends Expression:
   left/Expression
   op/string
@@ -538,6 +654,9 @@ class Binary extends Expression:
   accept visitor/NodeVisitor -> any:
     return visitor.visit-Binary this
 
+/**
+A named argument.
+*/
 class Named extends Expression:
   parameter/VarDefinition
   value/Expression

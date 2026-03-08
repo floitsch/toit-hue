@@ -1,10 +1,3 @@
-# Toit-gen
-Generate Toit code dynamically.
-
-## Usage
-Here is a small example of how to use `toit-gen` to generate a script that prints a string:
-
-```toit
 import toit-gen show *
 
 main:
@@ -27,11 +20,11 @@ main:
   
   lib.functions.add main-fn
 
-  // Wrap it in a program and print out the generated code inline.
+  // Wrap it in a program.
+
   program := Program
   program.libraries.add lib
 
   // Print the generated file in-memory.
   result := program.gen --in-memory
   print result["generated/hello.toit"]
-```

@@ -5,6 +5,9 @@
 import .toit-gen
 import .toit-gen show Lambda
 
+/**
+A visitor interface for all AST nodes.
+*/
 interface NodeVisitor:
   visit-Program node/Program -> any
   visit-Library node/Library -> any
@@ -40,6 +43,11 @@ interface NodeVisitor:
   visit-Binary node/Binary -> any
   visit-Named node/Named -> any
 
+/**
+A standard visitor that recursively visits all child nodes.
+
+Subclass this visitor to traverse the entire AST.
+*/
 class TraversingVisitor implements NodeVisitor:
   visit-Program node/Program -> any:
     node.libraries.do: it.accept this
