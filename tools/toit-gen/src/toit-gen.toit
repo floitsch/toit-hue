@@ -314,6 +314,7 @@ class UnnamedParamNamingVisitor extends TraversingVisitor:
 class GeneratingVisitor implements NodeVisitor:
   context/WriteContext_
   omit-trailing-newline_/bool := false
+  current-class_/Class? := null
 
   constructor .context:
 
@@ -341,6 +342,7 @@ class GeneratingVisitor implements NodeVisitor:
     return visit-Function node
 
   visit-Library node/Library -> any:
+    write-toitdoc_ node.toitdoc
     node.imports.do: | imp | if not imp.refs.is-empty: imp.accept this
     if not node.imports.is-empty: context.write-line ""
     node.exports.do: | exp | exp.accept this
@@ -374,6 +376,9 @@ class GeneratingVisitor implements NodeVisitor:
     return null
 
   visit-Class node/Class -> any:
+    old-class := current-class_
+    current-class_ = node
+    write-toitdoc_ node.toitdoc
     line := ""
     if node.is-abstract: line += "abstract "
     if node.kind == Class.INTERFACE: line += "interface"
@@ -387,6 +392,7 @@ class GeneratingVisitor implements NodeVisitor:
     context.indent
 
     node.fields.do: | field/VarDefinition |
+      write-toitdoc_ field.toitdoc
       context.write field.name
       if field.type:
         context.write "/$(field.type.target.name)"
@@ -412,9 +418,11 @@ class GeneratingVisitor implements NodeVisitor:
 
     context.dedent
     context.write-line ""
+    current-class_ = old-class
     return null
 
   visit-Function node/Function -> any:
+    write-toitdoc_ node.toitdoc
     line := "$node.name"
     node.parameters.do: | param/VarDefinition |
       param-str := param.name
@@ -645,6 +653,45 @@ class GeneratingVisitor implements NodeVisitor:
     omit-trailing-newline_ = old-omit
     context.dedent
 
+  write-toitdoc_ toitdoc/List? -> none:
+    if not toitdoc: return
+    parts := []
+    toitdoc.do: | segment |
+      if segment is string:
+        parts.add segment
+      else if segment is ToitdocNameRef:
+        ref := segment as ToitdocNameRef
+        if ref.holder and (not current-class_ or not (identical ref.holder current-class_)):
+          parts.add "\$$(ref.holder.name).$(ref.target.name)"
+        else:
+          parts.add "\$$(ref.target.name)"
+      else if segment is ToitdocExactRef:
+        ref := segment as ToitdocExactRef
+        param-parts := ref.target.parameters.map: | p/VarDefinition |
+          if p.is-block: "[$p.name]"
+          else if p.is-named: "--$p.name"
+          else: p.name
+        params := param-parts.join " "
+        qualified/string := ?
+        if ref.holder and (not current-class_ or not (identical ref.holder current-class_)):
+          qualified = "$(ref.holder.name).$(ref.target.name)"
+        else:
+          qualified = ref.target.name
+        if params.is-empty:
+          parts.add "\$($qualified)"
+        else:
+          parts.add "\$($qualified $params)"
+      else if segment is ToitdocSuperRef:
+        parts.add "\$super"
+    text := parts.join ""
+    lines := text.split "\n"
+    if lines.size == 1:
+      context.write-line "/** $text */"
+    else:
+      context.write-line "/**"
+      lines.do: context.write-line it
+      context.write-line "*/"
+
 next-hash-code_ := 0
 
 interface Node:
@@ -657,6 +704,20 @@ abstract class BaseNode_ implements Node:
   abstract accept visitor/NodeVisitor -> any
   operator == other/any -> bool:
     return identical this other
+
+class ToitdocNameRef:
+  holder/RefTarget?
+  target/RefTarget
+
+  constructor .target --.holder=null:
+
+class ToitdocExactRef:
+  holder/RefTarget?
+  target/Function
+
+  constructor .target --.holder=null:
+
+class ToitdocSuperRef:
 
 class Program extends BaseNode_:
   libraries/List ::= []
@@ -776,6 +837,7 @@ class Library extends BaseNode_:
   classes/List ::= []  // Of Class.
   globals/List ::= []  // Of VarDefinition.
   functions/List ::= []  // Of Function.
+  toitdoc/List? := null
 
   constructor .path:
 
@@ -825,6 +887,7 @@ class Class extends BaseNode_ implements RefTarget:
   static-functions/List ::= []
   is-abstract/bool
   super-class/Ref?
+  toitdoc/List? := null
 
   constructor .preferred-name --.is-abstract=false --.kind --.super-class=null:
 
@@ -851,6 +914,7 @@ class Function extends BaseNode_ implements RefTarget:
   is-abstract/bool
   is-static/bool
   is-constructor/bool := false
+  toitdoc/List? := null
 
   constructor .preferred-name
       --.parameters
@@ -896,6 +960,7 @@ class VarDefinition extends BaseNode_ implements RefTarget:
   is-block/bool
   is-named/bool
   is-final/bool
+  toitdoc/List? := null
 
   constructor.parameter .preferred-name
       --.type=null
