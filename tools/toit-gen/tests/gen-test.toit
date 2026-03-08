@@ -24,6 +24,10 @@ main:
   test-toitdoc-function
   test-toitdoc-member-params
   test-toitdoc-exact-named-block
+  test-toitdoc-member-no-shadow-global
+  test-toitdoc-ref-global-from-class
+  test-toitdoc-param-shadows-global
+  test-toitdoc-param-shadows-member
 
 test-basic-class:
   cls := toit-gen.Class "MyClass" --kind=toit-gen.Class.CLASS
@@ -456,6 +460,154 @@ test-toitdoc-exact-named-block:
 
     /** Sets up a route using \$(Server.route path --method [handler]). */
     setup:"""
+  expect-equals expected code.trim
+
+test-toitdoc-member-no-shadow-global:
+  // A class member and a top-level function share the same preferred name.
+  // The namer must rename the member to avoid shadowing the global.
+  // A toitdoc inside the class referencing the top-level function should
+  // use the global's name (which the member can't shadow).
+  lib := toit-gen.Library "test-toitdoc-member-no-shadow.toit"
+
+  cls := toit-gen.Class "MyClass" --kind=toit-gen.Class.CLASS
+  member := toit-gen.Function "connect" --parameters=[] --return-type=null
+  cls.members.add member
+
+  global-fun := toit-gen.Function "connect" --parameters=[] --return-type=null
+  lib.functions.add global-fun
+
+  // Member 'bar' has a toitdoc referencing the top-level 'connect'.
+  bar := toit-gen.Function "bar" --parameters=[] --return-type=null
+  bar.toitdoc = [
+    "See ", toit-gen.ToitdocNameRef global-fun, ".",
+  ]
+  cls.members.add bar
+  lib.classes.add cls
+
+  program := toit-gen.Program
+  program.libraries.add lib
+
+  generated := program.gen --in-memory
+  code := generated["test-toitdoc-member-no-shadow.toit"]
+
+  // The namer assigns 'connect' to the global function first.
+  // The member gets a different name (e.g. 'connect-1').
+  // The toitdoc should emit '$connect' since the global got 'connect'
+  // and there's no member named 'connect' in this class to shadow it.
+  expected := """
+    class MyClass:
+      connect-1:
+
+      /** See \$connect. */
+      bar:
+
+
+    connect:"""
+  expect-equals expected code.trim
+
+test-toitdoc-ref-global-from-class:
+  // A class member references a top-level function from its toitdoc.
+  // No name collision — just verifying the global ref is emitted
+  // unqualified (no holder).
+  lib := toit-gen.Library "test-toitdoc-ref-global.toit"
+
+  global-fun := toit-gen.Function "helper" --parameters=[] --return-type=null
+  lib.functions.add global-fun
+
+  cls := toit-gen.Class "MyClass" --kind=toit-gen.Class.CLASS
+  member := toit-gen.Function "do-work" --parameters=[] --return-type=null
+  member.toitdoc = [
+    "Delegates to ", toit-gen.ToitdocNameRef global-fun, ".",
+  ]
+  cls.members.add member
+  lib.classes.add cls
+
+  program := toit-gen.Program
+  program.libraries.add lib
+
+  generated := program.gen --in-memory
+  code := generated["test-toitdoc-ref-global.toit"]
+
+  expected := """
+    class MyClass:
+      /** Delegates to \$helper. */
+      do-work:
+
+
+    helper:"""
+  expect-equals expected code.trim
+
+test-toitdoc-param-shadows-global:
+  // A top-level function has a parameter with the same preferred name
+  // as another top-level function.  The namer assigns the function name
+  // first (Phase 3), then the parameter (Phase 4/5), so the parameter
+  // gets renamed.  The toitdoc references the *function*, which keeps
+  // its original name.
+  lib := toit-gen.Library "test-toitdoc-param-shadow-global.toit"
+
+  target-fun := toit-gen.Function "process" --parameters=[] --return-type=null
+  lib.functions.add target-fun
+
+  p := toit-gen.VarDefinition.parameter "process"
+  caller := toit-gen.Function "run" --parameters=[p] --return-type=null
+  caller.toitdoc = [
+    "Calls ", toit-gen.ToitdocNameRef target-fun, " after setting up ", toit-gen.ToitdocNameRef p, ".",
+  ]
+  lib.functions.add caller
+
+  program := toit-gen.Program
+  program.libraries.add lib
+
+  generated := program.gen --in-memory
+  code := generated["test-toitdoc-param-shadow-global.toit"]
+
+  // 'process' is assigned to the function.  The parameter gets renamed
+  // (e.g. 'process-1') because the global namer already has 'process'.
+  // The toitdoc '$process' correctly refers to the function.
+  expected := """
+    process:
+
+    /** Calls \$process after setting up \$process-1. */
+    run process-1:"""
+  expect-equals expected code.trim
+
+test-toitdoc-param-shadows-member:
+  // A member function has a parameter with the same preferred name
+  // as a sibling member.  The namer assigns member names first
+  // (Phase 3), then parameters (Phase 4/5), so the parameter gets
+  // renamed.  A toitdoc on the function references the sibling member.
+  lib := toit-gen.Library "test-toitdoc-param-shadow-member.toit"
+  cls := toit-gen.Class "Worker" --kind=toit-gen.Class.CLASS
+
+  // Sibling member 'status'.
+  status := toit-gen.Function "status" --parameters=[] --return-type=null
+  cls.members.add status
+
+  // Method 'update' with parameter preferred-name 'status'.
+  p := toit-gen.VarDefinition.parameter "status"
+  update := toit-gen.Function "update" --parameters=[p] --return-type=null
+  update.toitdoc = [
+    "Updates the ", toit-gen.ToitdocNameRef status, " to ", toit-gen.ToitdocNameRef p, ".",
+  ]
+  cls.members.add update
+  lib.classes.add cls
+
+  program := toit-gen.Program
+  program.libraries.add lib
+
+  generated := program.gen --in-memory
+  code := generated["test-toitdoc-param-shadow-member.toit"]
+
+  // 'status' is assigned to the member (Phase 3).
+  // The parameter gets renamed (e.g. 'status-1') because the member
+  // namer already has 'status'.
+  // The toitdoc '$status' correctly refers to the sibling member.
+  expected := """
+    class Worker:
+      status:
+
+      /** Updates the \$status to \$status-1. */
+      update status-1:"""
   expect-equals expected code.trim
 
 
