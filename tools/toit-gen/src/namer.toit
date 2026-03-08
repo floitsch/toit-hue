@@ -100,6 +100,8 @@ toit-identifier str/string --private/bool=false -> string:
       if last-was-dash or i == chars.size - 1:
         continue // Skip this character.
       last-was-dash = true
+    else:
+      last-was-dash = false
     chars[to++] = c
   chars.resize to
   if private: chars.add '_'
@@ -152,6 +154,17 @@ split-into-chunks_ str/string -> List:
   if start != str.size: result.add str[start..]
   return result
 
+/**
+Normalizes $name by converting underscores to dashes.
+
+Preserves the trailing underscore for private names.
+*/
+normalize_ name/string -> string:
+  is-private := name.ends-with "_"
+  core := is-private ? name[.. name.size - 1] : name
+  normalized := core.replace --all "_" "-"
+  return is-private ? "$(normalized)_" : normalized
+
 abstract class Namer:
   used-names/Set ::= {}
   outer-namer/Namer?
@@ -160,10 +173,11 @@ abstract class Namer:
     outer-namer = outer
 
   reserve name/string --check/bool=true --deep/bool=false -> none:
-    assert: not check or not used-names.contains name
-    used-names.add name
+    normalized := normalize_ name
+    assert: not check or not used-names.contains normalized
+    used-names.add normalized
     if deep and outer-namer:
-      outer-namer.reserve name --check=false --deep=true
+      outer-namer.reserve normalized --check=false --deep=true
 
   use-unique name/string -> string:
     unique-name := unique name --is-free=: is-free it
@@ -171,10 +185,11 @@ abstract class Namer:
     return unique-name
 
   is-free name/string -> bool:
+    normalized := normalize_ name
     namer/Namer? := this
-    if RESERVED_.contains name: return false
+    if RESERVED_.contains normalized: return false
     while namer:
-      if namer.used-names.contains name: return false
+      if namer.used-names.contains normalized: return false
       namer = namer.outer-namer
     return true
 
@@ -189,8 +204,28 @@ class GlobalNamer extends Namer:
   use-constant preferred/string --private/bool=false -> string:
     return use-unique (toit-constant-name preferred --private=private)
 
-  use-prefix preferred/string --private/bool=false -> string:
-    return use-unique (toit-prefix-name preferred --private=private)
+  use-prefix preferred/string --private/bool=false --also-avoid/Set={} -> string:
+    name := toit-prefix-name preferred --private=private
+    if also-avoid.is-empty:
+      return use-unique name
+    unique-name := unique name --is-free=: is-free it and not (also-avoid.contains it)
+    used-names.add unique-name
+    return unique-name
+
+  /**
+  Assigns a name for $preferred, allowing overloads to share names.
+
+  Uses the $cache to track already-assigned names by their computed
+    toit name. If the same toit name was already assigned, the cached
+    result is returned.
+  */
+  use-shared-global preferred/string --private/bool=false --cache/Map -> string:
+    toit-name := toit-global-name preferred --private=private
+    cached := cache.get toit-name
+    if cached: return cached
+    result := use-unique toit-name
+    cache[toit-name] = result
+    return result
 
   new-member-namer -> MemberNamer:
     return MemberNamer this
@@ -207,6 +242,21 @@ class MemberNamer extends Namer:
 
   use-constant preferred/string --private/bool=false -> string:
     return use-unique (toit-constant-name preferred --private=private)
+
+  /**
+  Assigns a name for $preferred, allowing overloads to share names.
+
+  Uses the $cache to track already-assigned names by their computed
+    toit name. If the same toit name was already assigned, the cached
+    result is returned.
+  */
+  use-shared-member preferred/string --private/bool=false --cache/Map -> string:
+    toit-name := toit-member-name preferred --private=private
+    cached := cache.get toit-name
+    if cached: return cached
+    result := use-unique toit-name
+    cache[toit-name] = result
+    return result
 
   new-local-namer -> LocalNamer:
     return LocalNamer this

@@ -220,8 +220,8 @@ class FixedNamingVisitor extends TraversingVisitor:
   visit-Function node/Function -> any:
     old := current-namer
     if node.name:
-      if old is MemberNamer: (old as MemberNamer).reserve node.name --deep=true
-      else if old is GlobalNamer: (old as GlobalNamer).reserve node.name
+      if old is MemberNamer: (old as MemberNamer).reserve node.name --check=false --deep=true
+      else if old is GlobalNamer: (old as GlobalNamer).reserve node.name --check=false
     local-namer := namers.get node --init=:
       old is MemberNamer ? (old as MemberNamer).new-local-namer : (old as GlobalNamer).new-local-namer
     current-namer = local-namer
@@ -234,13 +234,13 @@ class FixedNamingVisitor extends TraversingVisitor:
       if current-namer is LocalNamer:
         (current-namer as LocalNamer).reserve node.name --deep=true
       else if current-namer is MemberNamer:
-        (current-namer as MemberNamer).reserve node.name --deep=true
+        (current-namer as MemberNamer).reserve node.name --check=false --deep=true
       else if current-namer is GlobalNamer:
         (current-namer as GlobalNamer).reserve node.name
     super node
     return null
 
-class PublicNamingVisitor extends TraversingVisitor:
+class LocalNamingVisitor extends TraversingVisitor:
   namers/Map
   current-namer/Namer? := null
 
@@ -255,40 +255,21 @@ class PublicNamingVisitor extends TraversingVisitor:
 
   visit-Class node/Class -> any:
     old := current-namer
-    if not node.name: node.name = (old as GlobalNamer).use-class node.preferred-name
-    member-namer := namers[node]
-    current-namer = member-namer
+    current-namer = namers[node]
     super node
-    member-namer.used-names.do: | member-name/string |
-      if not (old as GlobalNamer).used-names.contains member-name:
-        (old as GlobalNamer).reserve member-name --deep=false --check=false
     current-namer = old
     return null
 
   visit-Function node/Function -> any:
     old := current-namer
-    if not node.name:
-      if old is MemberNamer:
-        node.name = (old as MemberNamer).use-member node.preferred-name --private=node.is-static
-      else if old is GlobalNamer:
-        node.name = (old as GlobalNamer).use-global node.preferred-name
     current-namer = namers[node]
     super node
     current-namer = old
     return null
 
   visit-VarDefinition node/VarDefinition -> any:
-    if not node.name:
-      if current-namer is GlobalNamer:
-        node.name = (current-namer as GlobalNamer).use-global node.preferred-name
-      else if current-namer is MemberNamer:
-        node.name = (current-namer as MemberNamer).use-member node.preferred-name
-      else if current-namer is LocalNamer and node.is-named:
-        outer := (current-namer as LocalNamer).outer-namer
-        if outer is MemberNamer:
-          node.name = (outer as MemberNamer).use-member node.preferred-name
-        else if outer is GlobalNamer:
-          node.name = (outer as GlobalNamer).use-global node.preferred-name
+    if not node.name and current-namer is LocalNamer:
+      node.name = (current-namer as LocalNamer).use-local node.preferred-name
     super node
     return null
 
@@ -326,45 +307,6 @@ class UnnamedParamNamingVisitor extends TraversingVisitor:
         node.name = (outer as MemberNamer).use-member node.preferred-name
       else if outer is GlobalNamer:
         node.name = (outer as GlobalNamer).use-global node.preferred-name
-    super node
-    return null
-
-class RemainingNamingVisitor extends TraversingVisitor:
-  namers/Map
-  current-namer/Namer? := null
-
-  constructor .namers:
-
-  visit-Program node/Program -> any:
-    node.libraries.do: | library/Library |
-      current-namer = namers[library]
-      library.accept this
-      current-namer = null
-    return null
-
-  visit-Import node/Import -> any:
-    if node.preferred-prefix:
-      node.prefix = (current-namer as GlobalNamer).use-prefix node.preferred-prefix
-    super node
-    return null
-
-  visit-Class node/Class -> any:
-    old := current-namer
-    current-namer = namers[node]
-    super node
-    current-namer = old
-    return null
-
-  visit-Function node/Function -> any:
-    old := current-namer
-    current-namer = namers[node]
-    super node
-    current-namer = old
-    return null
-
-  visit-VarDefinition node/VarDefinition -> any:
-    if not node.name and current-namer is LocalNamer:
-      node.name = (current-namer as LocalNamer).use-local node.preferred-name
     super node
     return null
 
@@ -724,10 +666,82 @@ class Program extends BaseNode_:
 
   assign-names_ -> none:
     namers := {:}
+    // Phase 1: Reserve fixed (pre-assigned) names.
     this.accept (FixedNamingVisitor namers)
-    this.accept (PublicNamingVisitor namers)
+
+    // Phase 2: Assign class and global variable names.
+    libraries.do: | library/Library |
+      global-namer/GlobalNamer := namers[library]
+      library.classes.do: | cls/Class |
+        if not cls.name:
+          cls.name = global-namer.use-class cls.preferred-name
+      library.globals.do: | g/VarDefinition |
+        if not g.name:
+          g.name = global-namer.use-global g.preferred-name
+
+    // Phase 3: Assign function names, field names, and static field names.
+    // Uses shared naming so that overloaded functions and fields with
+    // the same preferred name get the same assigned name.
+    libraries.do: | library/Library |
+      global-namer/GlobalNamer := namers[library]
+      global-cache := {:}
+      library.functions.do: | fun/Function |
+        if not fun.name:
+          fun.name = global-namer.use-shared-global fun.preferred-name --cache=global-cache
+      library.classes.do: | cls/Class |
+        member-namer/MemberNamer := namers[cls]
+        member-cache := {:}
+        cls.members.do: | fun/Function |
+          if not fun.name:
+            fun.name = member-namer.use-shared-member fun.preferred-name --private=fun.is-static --cache=member-cache
+        cls.static-functions.do: | fun/Function |
+          if not fun.name:
+            fun.name = member-namer.use-shared-member fun.preferred-name --private=fun.is-static --cache=member-cache
+        cls.fields.do: | field/VarDefinition |
+          if not field.name:
+            field.name = member-namer.use-shared-member field.preferred-name --cache=member-cache
+        cls.static-fields.do: | field/VarDefinition |
+          if not field.name:
+            field.name = member-namer.use-shared-member field.preferred-name --cache=member-cache
+
+    // Phase 4: Assign named parameter names.
+    // Uses shared naming so overloaded functions with the same named
+    // parameter get the same assigned parameter name.
+    libraries.do: | library/Library |
+      global-namer/GlobalNamer := namers[library]
+      global-param-cache := {:}
+      library.functions.do: | fun/Function |
+        fun.parameters.do: | param/VarDefinition |
+          if not param.name and param.is-named:
+            param.name = global-namer.use-shared-global param.preferred-name --cache=global-param-cache
+      library.classes.do: | cls/Class |
+        member-namer/MemberNamer := namers[cls]
+        member-param-cache := {:}
+        cls.members.do: | fun/Function |
+          fun.parameters.do: | param/VarDefinition |
+            if not param.name and param.is-named:
+              param.name = member-namer.use-shared-member param.preferred-name --cache=member-param-cache
+        cls.static-functions.do: | fun/Function |
+          fun.parameters.do: | param/VarDefinition |
+            if not param.name and param.is-named:
+              param.name = member-namer.use-shared-member param.preferred-name --cache=member-param-cache
+
+    // Phase 5: Assign unnamed, non-block parameter names.
     this.accept (UnnamedParamNamingVisitor namers)
-    this.accept (RemainingNamingVisitor namers)
+
+    // Phase 6: Assign prefixes and remaining local names.
+    // Collect all already-assigned names to ensure prefixes don't
+    // clash with any name in any scope.
+    all-names := {}
+    namers.do: | _ namer/Namer |
+      all-names.add-all namer.used-names
+    libraries.do: | library/Library |
+      global-namer/GlobalNamer := namers[library]
+      library.imports.do: | imp/Import |
+        if imp.preferred-prefix:
+          imp.prefix = global-namer.use-prefix imp.preferred-prefix
+              --also-avoid=all-names
+    this.accept (LocalNamingVisitor namers)
 
   gen -> none:
     assign-names_
